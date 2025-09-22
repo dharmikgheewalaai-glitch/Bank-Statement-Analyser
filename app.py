@@ -4,7 +4,7 @@ import pandas as pd
 import re
 from extractor import process_file
 
-st.title("📄 Bank Statement Analyser")
+st.title("📄 Bank Statement Extractor")
 
 uploaded_file = st.file_uploader("Upload Bank Statement (PDF)", type=["pdf"])
 
@@ -62,4 +62,3 @@ if uploaded_file is not None:
             file_name=csv_filename,
             mime="text/csv"
         )
-
