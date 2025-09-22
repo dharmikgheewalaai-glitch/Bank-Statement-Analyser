@@ -1,7 +1,7 @@
 # app.py
 import streamlit as st
 import pandas as pd
-from extractor import process_file   # extractor.py must be in the same folder
+from extractor import process_file   # ✅ Only app.py imports extractor.py
 
 st.set_page_config(page_title="Bank Statement Analyser", layout="wide")
 st.title("📑 Bank Statement Analyser")
@@ -20,14 +20,12 @@ if uploaded_file:
     else:
         df = pd.DataFrame(transactions)
 
-        # ✅ Format Date to DD/MM/YYYY without prefix/suffix
         if "Date" in df.columns:
             df["Date"] = df["Date"].astype(str).str.replace("'", "").str.strip()
 
         st.success(f"✅ Extracted {len(df)} transactions from {filename}")
         st.dataframe(df, use_container_width=True)
 
-        # Save to Excel with same name as uploaded file
         excel_name = filename.replace(".pdf", ".xlsx")
         df.to_excel(excel_name, index=False)
 
@@ -39,7 +37,6 @@ if uploaded_file:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    # Show logs if needed
     with st.expander("🔍 Processing Logs"):
         for log in meta.get("_logs", []):
             st.text(log)
