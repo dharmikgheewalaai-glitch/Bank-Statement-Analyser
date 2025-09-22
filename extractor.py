@@ -1,37 +1,45 @@
-import pdfplumber
-import re
-from io import BytesIO
+# app.py
+import streamlit as st
+import pandas as pd
+from extractor import process_file   # extractor.py must be in the same folder
 
-# ----------------- HELPERS -----------------
-def clean_date(text: str) -> str:
-    match = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", str(text))
-    if match:
-        day, month, year = match.groups()
-        if len(year) == 2:
-            year = "20" + year
-        return f"{int(day):02d}/{int(month):02d}/{year}"
-    return str(text)
+st.set_page_config(page_title="Bank Statement Analyser", layout="wide")
+st.title("📑 Bank Statement Analyser")
 
-def detect_head(particulars: str) -> str:
-    particulars = particulars.upper()
-    if any(word in particulars for word in ["ATM", "CASH", "CASA"]):
-        return "CASH"
-    elif any(word in particulars for word in ["UPI", "IMPS", "NEFT", "RTGS", "TRANSFER", "TRF", "INTRA"]):
-        return "TRANSFER"
-    elif any(word in particulars for word in ["INT", "INTEREST"]):
-        return "INTEREST"
-    elif any(word in particulars for word in ["CHRG", "CHARGE", "FEE", "GST", "PENALTY"]):
-        return "CHARGE"
-    elif any(word in particulars for word in ["SALARY", "PAYROLL"]):
-        return "SALARY"
-    elif any(word in particulars for word in ["REFUND", "REVERSAL"]):
-        return "REFUND"
-    elif any(word in particulars for word in ["LIC"]):
-        return "LIC"
-    elif any(word in particulars for word in ["ICICI SECURITIES", "ICICISEC"]):
-        return "ICICI SECURITIES"
+uploaded_file = st.file_uploader("Upload your Bank Statement (PDF)", type=["pdf"])
+
+if uploaded_file:
+    file_bytes = uploaded_file.read()
+    filename = uploaded_file.name
+
+    with st.spinner("⏳ Processing file..."):
+        meta, transactions = process_file(file_bytes, filename)
+
+    if not transactions:
+        st.error("⚠️ No transactions found in this PDF.")
     else:
-        return "OTHER"
+        df = pd.DataFrame(transactions)
 
-def detect_sub_head(particulars: str) -> str:
-    # Account numbers like XXXXXXX
+        # ✅ Format Date to DD/MM/YYYY without prefix/suffix
+        if "Date" in df.columns:
+            df["Date"] = df["Date"].astype(str).str.replace("'", "").str.strip()
+
+        st.success(f"✅ Extracted {len(df)} transactions from {filename}")
+        st.dataframe(df, use_container_width=True)
+
+        # Save to Excel with same name as uploaded file
+        excel_name = filename.replace(".pdf", ".xlsx")
+        df.to_excel(excel_name, index=False)
+
+        with open(excel_name, "rb") as f:
+            st.download_button(
+                label="📥 Download Excel",
+                data=f,
+                file_name=excel_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    # Show logs if needed
+    with st.expander("🔍 Processing Logs"):
+        for log in meta.get("_logs", []):
+            st.text(log)
