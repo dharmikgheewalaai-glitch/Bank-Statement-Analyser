@@ -1,198 +1,80 @@
-import re
-from io import BytesIO
-from itertools import zip_longest
 import pdfplumber
+import pandas as pd
+import re
 
-# ----------------- CONFIG -----------------
-HEAD_RULES = {
-    "CASH": ["ATM", "CASH", "CSH", "CASA"],
-    "Withdrawal": ["UPI", "IMPS", "NEFT", "RTGS", "WITHDRAWAL", "DEBIT", "PAYMENT", "TRANSFER", "TRF", "INTRA"],
-    "Interest": ["INT", "INTEREST", "CR INT"],
-    "Charge": ["CHRG", "CHARGE", "FEE", "GST", "PENALTY"],
-    "Salary": ["SALARY", "PAYROLL"],
-    "Refund": ["REFUND", "REVERSAL"],
-    
-}
+# --- Clean Date ---
+def clean_date(text: str) -> str:
+    match = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", str(text))
+    if match:
+        day, month, year = match.groups()
+        if len(year) == 2:
+            year = "20" + year  # Fix YY → YYYY
+        return f"{int(day):02d}/{int(month):02d}/{year}"
+    return str(text)
 
-HEADER_ALIASES = {
-    "date": ["date", "txn date", "transaction date", "value date", "tran date"],
-    "particulars": ["particulars", "description", "narration", "transaction particulars", "details", "remarks"],
-    "debit": ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
-    "credit": ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
-    "balance": ["balance", "running balance", "closing balance", "bal"]
-}
+# --- Detect Head (Transaction Type) ---
+def detect_head(particulars: str) -> str:
+    particulars = particulars.upper()
 
-DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
-AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
-ACCOUNT_RE = re.compile(r'(?:X{2,}|\*{2,})\d{3,}')  # e.g., XXXXXXXX9012
-NAME_RE = re.compile(r'\b[A-Z][A-Z ]{2,}\b')  # heuristic for institution/person names
+    if any(word in particulars for word in ["ATM", "CASH", "CASA"]):
+        return "CASH"
+    elif any(word in particulars for word in ["UPI", "IMPS"]):
+        return "WITHDRAWAL"
+    elif any(word in particulars for word in ["INT", "INTEREST"]):
+        return "INTEREST"
+    elif any(word in particulars for word in ["CHRG", "CHARGE", "GST"]):
+        return "CHARGE"
+    elif any(word in particulars for word in ["TRANSFER", "TRF", "INTRA"]):
+        return "TRANSFER"
+    else:
+        return "WITHDRAWAL"  # Default bucket
 
-# ----------------- HELPERS -----------------
-def log(msg, meta):
-    meta.setdefault("_logs", []).append(str(msg))
+# --- Detect Sub Head (Names & Account Numbers) ---
+def detect_sub_head(particulars: str) -> str:
+    # Check for masked account numbers like Acc:xxxx0301 or XXXXXXXX9012
+    acc_match = re.search(r"(Acc:\s*X{2,}\d{3,4}|X{6,}\d{2,4})", particulars, re.IGNORECASE)
+    if acc_match:
+        return acc_match.group(0).strip()
 
-def normalize_header_cell(cell):
-    if cell is None:
-        return ""
-    return str(cell).strip().lower()
+    # Check for proper names (2–4 capitalized words, like "Chetan C Gheewala")
+    name_match = re.search(r"\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){1,3})\b", particulars)
+    if name_match:
+        return name_match.group(0).strip()
 
-def map_header_to_std(h):
-    h = (h or "").strip().lower()
-    for std, aliases in HEADER_ALIASES.items():
-        for a in aliases:
-            if h.startswith(a) or a in h:
-                return std
-    return None
+    return ""
 
-def parse_amount(s):
-    if s is None:
-        return None
-    s = str(s).strip().replace('\xa0', ' ')
-    s = re.sub(r'[^\d\-,.\s]', '', s)
-    s = s.replace(' ', '').replace(',', '')
-    if s == '':
-        return None
-    try:
-        return float(s)
-    except:
-        m = AMOUNT_RE.search(str(s))
-        if m:
-            try:
-                return float(m.group(0).replace(',', '').replace(' ', ''))
-            except:
-                return None
-        return None
+# --- Extract from PDF ---
+def process_file(file_path):
+    rows = []
 
-def classify_head(particulars):
-    p = (particulars or "").upper()
-    for head, kws in HEAD_RULES.items():
-        for kw in kws:
-            if kw in p:
-                return head
-    return "Other"
-
-def extract_subhead(particulars):
-    """Try to extract account number or name from particulars"""
-    if not particulars:
-        return None
-    # Check account number
-    acc = ACCOUNT_RE.search(particulars)
-    if acc:
-        return acc.group(0)
-    # Check name
-    nm = NAME_RE.findall(particulars.upper())
-    if nm:
-        return max(nm, key=len).strip()
-    return None
-
-def find_header_row(table):
-    best_idx, best_score = 0, -1
-    for i, row in enumerate(table[:4]):
-        score = 0
-        for cell in row:
-            if not cell:
-                continue
-            c = str(cell).strip().lower()
-            for aliases in HEADER_ALIASES.values():
-                for a in aliases:
-                    if a in c:
-                        score += 3
-            if re.search(r'[a-zA-Z]', c):
-                score += 1
-        if score > best_score:
-            best_score = score
-            best_idx = i
-    return best_idx
-
-# ----------------- TABLE PROCESSING -----------------
-def table_to_transactions(table, meta, page_no=None):
-    txns = []
-    if not table or len(table) < 2:
-        return txns
-
-    header_idx = find_header_row(table)
-    headers = table[header_idx]
-    std_headers = [map_header_to_std(normalize_header_cell(h)) or normalize_header_cell(h) for h in headers]
-
-    for row in table[header_idx + 1:]:
-        row_cells = [c or "" for c in row]
-        if all((not str(x).strip()) for x in row_cells):
-            continue
-        row_dict = {}
-        for k, v in zip_longest(std_headers, row_cells, fillvalue=""):
-            row_dict[k or "col"] = (v or "").strip()
-
-        date = row_dict.get("date") or None
-        particulars = row_dict.get("particulars") or ""
-
-        if not date:
-            for cell in row_cells:
-                if DATE_RE.search(str(cell)):
-                    date = DATE_RE.search(str(cell)).group(0)
-                    break
-
-        debit_raw = row_dict.get("debit") or ""
-        credit_raw = row_dict.get("credit") or ""
-        balance_raw = row_dict.get("balance") or ""
-
-        debit_amt = parse_amount(debit_raw)
-        credit_amt = parse_amount(credit_raw)
-
-        if not (date and particulars and (debit_amt is not None or credit_amt is not None)):
-            continue
-
-        head = classify_head(particulars)
-        subhead = extract_subhead(particulars)
-
-        txns.append({
-            "Date": str(date).strip(),
-            "Particulars": str(particulars).strip(),
-            "Debit": debit_amt,
-            "Credit": credit_amt,
-            "Head": head,
-            "SubHead": subhead,
-            "Balance": balance_raw.strip() or None,
-            "Page": page_no
-        })
-    return txns
-
-# ----------------- MAIN API -----------------
-def process_file(file_bytes, filename):
-    meta = {"_logs": []}
-    transactions = []
-    try:
-        pdf = pdfplumber.open(BytesIO(file_bytes))
-    except Exception as e:
-        log(f"ERROR opening PDF: {e}", meta)
-        return meta, transactions
-
-    with pdf:
-        log(f"PDF opened: {len(pdf.pages)} pages", meta)
-        for p_idx, page in enumerate(pdf.pages, start=1):
-            try:
-                tables = page.extract_tables()
-                page_txns = []
-                for table in tables:
-                    tt = table_to_transactions(table, meta, page_no=p_idx)
-                    page_txns.extend(tt)
-
-                if not page_txns:
-                    text = page.extract_text() or ""
-                    # fallback not rewritten yet for subhead
-                transactions.extend(page_txns)
-            except Exception as e:
-                log(f"Error processing page {p_idx}: {e}", meta)
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:  # ✅ Process all pages
+            table = page.extract_table()
+            if not table:
                 continue
 
-    # Deduplicate
-    seen, deduped = set(), []
-    for r in transactions:
-        key = (r.get("Date"), r.get("Particulars"), r.get("Debit"), r.get("Credit"))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(r)
+            headers = [h.strip().upper() for h in table[0]]
+            for row in table[1:]:
+                row_dict = dict(zip(headers, row))
 
-    log(f"Total transactions (deduped): {len(deduped)}", meta)
-    meta["count"] = len(deduped)
-    return meta, deduped
+                date = clean_date(row_dict.get("DATE", ""))
+                particulars = str(row_dict.get("PARTICULARS", "")).strip()
+                debit = row_dict.get("DEBIT", "")
+                credit = row_dict.get("CREDIT", "")
+                balance = row_dict.get("BALANCE", "")
+
+                head = detect_head(particulars)
+                sub_head = detect_sub_head(particulars)
+
+                rows.append({
+                    "Date": date,
+                    "Particulars": particulars,
+                    "Debit": debit,
+                    "Credit": credit,
+                    "Balance": balance,
+                    "Head": head,
+                    "Sub Head": sub_head
+                })
+
+    df = pd.DataFrame(rows)
+    return df
