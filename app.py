@@ -1,45 +1,64 @@
+# app.py
 import streamlit as st
 import pandas as pd
-from extractor import process_file   # extractor.py must be in the same folder
+import re
+from extractor import process_file
 
-st.set_page_config(page_title="Bank Statement Analyzer", layout="wide")
+st.title("📄 Bank Statement Extractor")
 
-st.title("🏦 Bank Statement Analyzer")
+uploaded_file = st.file_uploader("Upload Bank Statement (PDF)", type=["pdf"])
 
-uploaded_file = st.file_uploader("Upload Bank Statement PDF", type=["pdf"])
+def clean_date(value):
+    """Extract date, remove prefix/suffix, normalize to DD/MM/YYYY"""
+    if not value:
+        return None
+    text = str(value).strip().replace("'", "").replace('"', "")
+
+    # ✅ Fix: regex supports /, -, or . as separators
+    match = re.search(r"(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})", text)
+    if match:
+        day, month, year = match.groups()
+        if len(year) == 2:  # handle yy format like 24 → 2024
+            year = "20" + year
+        return f"{int(day):02d}/{int(month):02d}/{year}"
+    return None
 
 if uploaded_file is not None:
-    filename = uploaded_file.name
+    st.info(f"Processing: {uploaded_file.name} ...")
+
+    # Read file
     file_bytes = uploaded_file.read()
 
-    with st.spinner("Extracting transactions..."):
-        meta, transactions = process_file(file_bytes, filename)
+    # Call extractor
+    meta, transactions = process_file(file_bytes, uploaded_file.name)
 
     if not transactions:
-        st.error("❌ No transactions found in this file.")
+        st.error("⚠️ No transactions found. Try with another PDF or check if it's a scanned copy.")
     else:
+        # Convert to DataFrame
         df = pd.DataFrame(transactions)
 
-        # Format Date column → DD/MM/YYYY
+        # ✅ Clean Date column
         if "Date" in df.columns:
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%d/%m/%Y")
+            df["Date"] = df["Date"].apply(clean_date)
 
-        st.success(f"✅ Extracted {len(df)} transactions")
+        st.success("✅ Transactions Extracted Successfully!")
+        
+        # Show metadata
+        with st.expander("📌 Account Details"):
+            st.json(meta)
 
-        # Show DataFrame in Streamlit
+        # Show DataFrame
         st.dataframe(df, use_container_width=True)
 
-        # Allow Excel download
-        output_filename = filename.replace(".pdf", ".xlsx")
-        st.download_button(
-            label="📥 Download as Excel",
-            data=df.to_excel(index=False, engine="openpyxl"),
-            file_name=output_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        # ✅ Save with same filename (but .csv)
+        csv_filename = uploaded_file.name.replace(".pdf", ".csv").replace(".PDF", ".csv")
 
-    # Debug logs
-    if "_logs" in meta:
-        with st.expander("🔍 Debug Logs"):
-            for log in meta["_logs"]:
-                st.text(log)
+        # Allow CSV download
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label=f"⬇️ Download Extracted Transactions ({csv_filename})",
+            data=csv,
+            file_name=csv_filename,
+            mime="text/csv"
+        )
