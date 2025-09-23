@@ -29,6 +29,19 @@ def clean_date(value):
     return None
 
 
+def clean_amount(value):
+    """Convert amounts like ₹1,234.50 or 1,234.50Dr to float"""
+    if pd.isna(value):
+        return None
+    text = str(value).replace(",", "").replace("₹", "").strip()
+    # Remove any trailing non-numeric characters (e.g., "Dr", "Cr")
+    text = re.sub(r"[^\d.\-]", "", text)
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
 if uploaded_file is not None:
     st.info(f"Processing: {uploaded_file.name} ...")
 
@@ -53,21 +66,18 @@ if uploaded_file is not None:
         if "Date" in df.columns:
             df["Date"] = df["Date"].apply(clean_date)
 
-        # Format Debit, Credit, Balance to 2 decimals
+        # Clean amounts
         for col in ["Debit", "Credit", "Balance"]:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
+                df[col] = df[col].apply(clean_amount).round(2)
 
         st.success("✅ Transactions Extracted Successfully!")
 
-        # Show only Name and Account No.
-        filtered_meta = {
-            k: v for k, v in meta.items() if k.lower() in ["account holder", "account number"]
-        }
+        # Show full metadata again
         with st.expander("📌 Account Details"):
-            st.json(filtered_meta)
+            st.json(meta)
 
-        # Show table
+        # Show DataFrame
         st.dataframe(df, use_container_width=True)
 
         # =============================
@@ -110,7 +120,6 @@ if uploaded_file is not None:
         styles = getSampleStyleSheet()
         header_style = styles["Heading4"]
         header_style.alignment = TA_CENTER
-        header_style.fontSize = 12
 
         # Add Title
         elements.append(Paragraph("Transaction Statement", header_style))
@@ -128,7 +137,6 @@ if uploaded_file is not None:
         style = TableStyle(
             [
                 ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 12),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("ALIGN", (0, 0), (-1, 0), "CENTER"),  # Header center
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
