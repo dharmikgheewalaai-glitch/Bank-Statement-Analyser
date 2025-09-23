@@ -29,7 +29,7 @@ def classify_head(particulars):
         return "IDFC FIRST BANK LTD"
     if any(kw in p for kw in ["BAJAJ ALLIANZ GEN INS COM"]):
         return "INSURANCE"
-    if any(kw in p for kw in ["INT", "INTEREST"]):
+    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
         return "INTEREST"
     if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
         return "LIC"
