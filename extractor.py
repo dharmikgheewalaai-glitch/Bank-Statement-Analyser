@@ -4,17 +4,59 @@ from io import BytesIO
 from itertools import zip_longest
 import pdfplumber
 
-# ----------------- HEAD CLASSIFICATION -----------------
+# ----------------- CONFIG -----------------
 HEAD_RULES = {
     "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
     "SALARY": ["SALARY", "PAYROLL"],
     "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV"],
 }
 
+HEADER_ALIASES = {
+    "date": ["date", "txn date", "transaction date", "value date", "tran date"],
+    "particulars": ["particulars", "description", "narration", "transaction particulars", "details", "remarks"],
+    "debit": ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
+    "credit": ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
+    "balance": ["balance", "running balance", "closing balance", "bal"]
+}
+
+DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
+AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
+
+# ----------------- HELPERS -----------------
+def normalize_header_cell(cell):
+    return str(cell).strip().lower() if cell else ""
+
+def map_header_to_std(h):
+    h = (h or "").strip().lower()
+    for std, aliases in HEADER_ALIASES.items():
+        for a in aliases:
+            if h.startswith(a) or a in h:
+                return std
+    return None
+
+def parse_amount(s):
+    if s is None:
+        return None
+    s = str(s).strip().replace('\xa0', ' ')
+    s = re.sub(r'[^\d\-,.\s]', '', s)
+    s = s.replace(' ', '').replace(',', '')
+    if s == '':
+        return None
+    try:
+        return float(s)
+    except:
+        m = AMOUNT_RE.search(str(s))
+        if m:
+            try:
+                return float(m.group(0).replace(',', '').replace(' ', ''))
+            except:
+                return None
+        return None
+
+# ----------------- HEAD CLASSIFICATION -----------------
 def classify_head(particulars):
     p = (particulars or "").upper()
 
-    # Direct conditions
     if any(kw in p for kw in ["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"]):
         return "BAJAJ FINANCE LTD"
     if any(kw in p for kw in ["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"]):
@@ -29,66 +71,25 @@ def classify_head(particulars):
         return "IDFC FIRST BANK LTD"
     if "BAJAJ ALLIANZ GEN INS COM" in p:
         return "INSURANCE"
-     if "INT PD" in p or "INT CR" in p or "INTEREST" in p:
+
+    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
         return "INTEREST"
+
     if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
         return "LIC"
     if "TAX REFUND" in p:
         return "TAX REFUND"
+
+    # ✅ Step 4: Generic head rules
     for head, kws in HEAD_RULES.items():
         for kw in kws:
             if kw in p:
                 return head
-    return "Other"
 
+    # ✅ Default
+    return "OTHER"
 
-# ----------------- CONFIG -----------------
-HEADER_ALIASES = {
-    "date": ["date", "txn date", "transaction date", "value date", "tran date"],
-    "particulars": ["particulars", "description", "narration", "transaction particulars", "details", "remarks"],
-    "debit": ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
-    "credit": ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
-    "balance": ["balance", "running balance", "closing balance", "bal"],
-}
-
-DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
-AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
-
-
-# ----------------- HELPERS -----------------
-def normalize_header_cell(cell):
-    return str(cell).strip().lower() if cell else ""
-
-
-def map_header_to_std(h):
-    h = (h or "").strip().lower()
-    for std, aliases in HEADER_ALIASES.items():
-        for a in aliases:
-            if h.startswith(a) or a in h:
-                return std
-    return None
-
-
-def parse_amount(s):
-    if s is None:
-        return None
-    s = str(s).strip().replace("\xa0", " ")
-    s = re.sub(r"[^\d\-,.\s]", "", s)
-    s = s.replace(" ", "").replace(",", "")
-    if s == "":
-        return None
-    try:
-        return float(s)
-    except:
-        m = AMOUNT_RE.search(str(s))
-        if m:
-            try:
-                return float(m.group(0).replace(",", "").replace(" ", ""))
-            except:
-                return None
-        return None
-
-
+# ----------------- TABLE PROCESSING -----------------
 def find_header_row(table):
     best_idx, best_score = 0, -1
     for i, row in enumerate(table[:4]):
@@ -101,16 +102,14 @@ def find_header_row(table):
                 for a in aliases:
                     if a in c:
                         score += 3
-            if re.search(r"[a-zA-Z]", c):
+            if re.search(r'[a-zA-Z]', c):
                 score += 1
         if score > best_score:
             best_score = score
             best_idx = i
     return best_idx
 
-
-# ----------------- TABLE PROCESSING -----------------
-def table_to_transactions(table, page_no=None):
+def table_to_transactions(table, meta, page_no=None):
     txns = []
     if not table or len(table) < 2:
         return txns
@@ -135,12 +134,6 @@ def table_to_transactions(table, page_no=None):
         date = row_dict.get("date") or None
         particulars = row_dict.get("particulars") or ""
 
-        if not date:
-            for cell in row_cells:
-                if DATE_RE.search(str(cell)):
-                    date = DATE_RE.search(str(cell)).group(0)
-                    break
-
         debit_amt = parse_amount(row_dict.get("debit") or "")
         credit_amt = parse_amount(row_dict.get("credit") or "")
         balance_val = parse_amount(row_dict.get("balance") or "")
@@ -155,15 +148,14 @@ def table_to_transactions(table, page_no=None):
             "Particulars": str(particulars).strip(),
             "Debit": debit_amt,
             "Credit": credit_amt,
-            "Balance": balance_val,
             "Head": head,
-            "Page": page_no,
+            "Balance": balance_val,
+            "Page": page_no
         })
     return txns
 
-
 # ----------------- TEXT FALLBACK -----------------
-def text_fallback_extract(page_text, page_no=None):
+def text_fallback_extract(page_text, meta, page_no=None):
     txns = []
     lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
     for ln in lines:
@@ -179,18 +171,9 @@ def text_fallback_extract(page_text, page_no=None):
 
         debit_amt, credit_amt, balance_val = None, None, None
         if len(nums) == 1:
-            if re.search(r"\b(debit|withdrawal|dr|withd)\b", ln, re.I):
-                debit_amt = nums[0]
-            elif re.search(r"\b(credit|deposit|cr)\b", ln, re.I):
-                credit_amt = nums[0]
-            else:
-                debit_amt = nums[0]
-        elif len(nums) == 2:
-            debit_amt, credit_amt = nums[0], None
-            balance_val = nums[1]
-        else:
-            balance_val = nums[-1]
-            debit_amt = nums[-2]
+            debit_amt = nums[0]
+        elif len(nums) >= 2:
+            debit_amt, balance_val = nums[-2], nums[-1]
 
         desc = ln
         head = classify_head(desc)
@@ -200,20 +183,20 @@ def text_fallback_extract(page_text, page_no=None):
             "Particulars": desc,
             "Debit": debit_amt,
             "Credit": credit_amt,
-            "Balance": balance_val,
             "Head": head,
-            "Page": page_no,
+            "Balance": balance_val,
+            "Page": page_no
         })
     return txns
 
-
 # ----------------- MAIN API -----------------
 def process_file(file_bytes, filename):
+    meta = {"_logs": []}
     transactions = []
     try:
         pdf = pdfplumber.open(BytesIO(file_bytes))
     except Exception as e:
-        return {}, transactions
+        return meta, transactions
 
     with pdf:
         for p_idx, page in enumerate(pdf.pages, start=1):
@@ -221,16 +204,16 @@ def process_file(file_bytes, filename):
                 tables = page.extract_tables()
                 page_txns = []
                 for table in tables:
-                    if not table or len(table) < 2:
-                        continue
-                    page_txns.extend(table_to_transactions(table, page_no=p_idx))
+                    tt = table_to_transactions(table, meta, page_no=p_idx)
+                    page_txns.extend(tt)
 
                 if not page_txns:
                     text = page.extract_text() or ""
-                    page_txns.extend(text_fallback_extract(text, page_no=p_idx))
+                    txt_tx = text_fallback_extract(text, meta, page_no=p_idx)
+                    page_txns.extend(txt_tx)
 
                 transactions.extend(page_txns)
-            except Exception:
+            except:
                 continue
 
     # Deduplicate
@@ -241,4 +224,4 @@ def process_file(file_bytes, filename):
             seen.add(key)
             deduped.append(r)
 
-    return {}, deduped
+    return meta, deduped
