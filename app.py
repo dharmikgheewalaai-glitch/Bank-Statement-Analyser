@@ -44,53 +44,110 @@ if uploaded_file is not None:
         if "Date" in df.columns:
             df["Date"] = df["Date"].apply(clean_date)
 
-        st.success("✅ Transactions Extracted Successfully!")
-        
-        # Show DataFrame
-        st.dataframe(df, use_container_width=True)
+        # ✅ Format Debit, Credit, Balance → 2 decimal places
+        for col in ["Debit", "Credit", "Balance"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").round(2)
 
-        # --- CSV Export ---
-        csv_filename = uploaded_file.name.replace(".pdf", ".csv").replace(".PDF", ".csv")
-        csv_data = df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="⬇️ Download CSV File",
-            data=csv_data,
-            file_name=csv_filename,
-            mime="text/csv"
+        st.success("✅ Transactions Extracted Successfully!")
+
+        # Show DataFrame with alignment
+        st.dataframe(
+            df.style.format({
+                "Debit": "{:,.2f}",
+                "Credit": "{:,.2f}",
+                "Balance": "{:,.2f}"
+            }).set_properties(
+                subset=["Debit", "Credit", "Balance"], **{"text-align": "right"}
+            ).set_properties(
+                subset=["Particulars"], **{"text-align": "left"}
+            ),
+            use_container_width=True
         )
 
-        # --- Excel Export ---
-        excel_filename = uploaded_file.name.replace(".pdf", ".xlsx").replace(".PDF", ".xlsx")
+        # --- Filenames ---
+        base_name = uploaded_file.name.rsplit(".", 1)[0]  # remove extension
+        csv_filename = f"{base_name}.csv"
+        excel_filename = f"{base_name}.xlsx"
+        pdf_filename = f"{base_name}.pdf"
+
+        # --- Prepare CSV ---
+        csv_data = df.to_csv(index=False).encode("utf-8")
+
+        # --- Prepare Excel ---
         excel_buffer = BytesIO()
         with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Transactions")
-        st.download_button(
-            label="⬇️ Download Excel File",
-            data=excel_buffer.getvalue(),
-            file_name=excel_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            # Apply alignment and format in Excel
+            from openpyxl import load_workbook
+            from openpyxl.styles import Alignment, numbers
+            excel_buffer.seek(0)
+            wb = load_workbook(excel_buffer)
+            ws = wb.active
+            for col in ["Debit", "Credit", "Balance"]:
+                if col in df.columns:
+                    col_idx = df.columns.get_loc(col) + 1
+                    for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, min_row=2):
+                        for cell in row:
+                            cell.alignment = Alignment(horizontal="right")
+                            cell.number_format = numbers.FORMAT_NUMBER_00
+            if "Particulars" in df.columns:
+                col_idx = df.columns.get_loc("Particulars") + 1
+                for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, min_row=2):
+                    for cell in row:
+                        cell.alignment = Alignment(horizontal="left")
+            excel_buffer = BytesIO()
+            wb.save(excel_buffer)
 
-        # --- PDF Export ---
-        pdf_filename = uploaded_file.name.replace(".pdf", "_transactions.pdf").replace(".PDF", "_transactions.pdf")
+        # --- Prepare PDF ---
         pdf_buffer = BytesIO()
         doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
         data = [df.columns.tolist()] + df.values.tolist()
         table = Table(data)
-        table.setStyle(TableStyle([
+        style = TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-        ]))
-        doc.build([table])
-        st.download_button(
-            label="⬇️ Download PDF File",
-            data=pdf_buffer.getvalue(),
-            file_name=pdf_filename,
-            mime="application/pdf"
-        )
+        ])
 
+        # Align columns
+        if "Particulars" in df.columns:
+            idx = df.columns.get_loc("Particulars")
+            style.add('ALIGN', (idx, 1), (idx, -1), 'LEFT')
+        for col in ["Debit", "Credit", "Balance"]:
+            if col in df.columns:
+                idx = df.columns.get_loc(col)
+                style.add('ALIGN', (idx, 1), (idx, -1), 'RIGHT')
+
+        table.setStyle(style)
+        doc.build([table])
+
+        # --- Show all three download buttons in one row ---
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.download_button(
+                label="Download CSV File",
+                data=csv_data,
+                file_name=csv_filename,
+                mime="text/csv"
+            )
+
+        with col2:
+            st.download_button(
+                label="Download Excel File",
+                data=excel_buffer.getvalue(),
+                file_name=excel_filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        with col3:
+            st.download_button(
+                label="Download PDF File",
+                data=pdf_buffer.getvalue(),
+                file_name=pdf_filename,
+                mime="application/pdf"
+            )
