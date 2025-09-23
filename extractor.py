@@ -5,6 +5,12 @@ from itertools import zip_longest
 import pdfplumber
 
 # ----------------- HEAD CLASSIFICATION -----------------
+HEAD_RULES = {
+    "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
+    "SALARY": ["SALARY", "PAYROLL"],
+    "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV"],
+}
+
 def classify_head(particulars):
     p = (particulars or "").upper()
 
@@ -29,14 +35,11 @@ def classify_head(particulars):
         return "LIC"
     if any(kw in p for kw in ["TAX REFUND"]):
         return "TAX REFUND"
-    if any(kw in p for kw in ["SALARY", "PAYROLL"]):
-        return "SALARY"
-    if any(kw in p for kw in ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"]):
-        return "CASH"
-    if any(kw in p for kw in ["ATM ISSUER REV", "UPI", "UPI REV"]):
-        return "WITHDRAWAL"
-
-        return "Other"
+    for head, kws in HEAD_RULES.items():
+        for kw in kws:
+            if kw in p:
+                return head
+    return "Other"
 
 
 # ----------------- CONFIG -----------------
