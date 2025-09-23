@@ -32,12 +32,12 @@ HEADER_ALIASES = {
 DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
 AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
 
-
 # ----------------- HELPERS -----------------
+def log(msg, meta):
+    meta.setdefault("_logs", []).append(str(msg))
+
 def normalize_header_cell(cell):
-    if cell is None:
-        return ""
-    return str(cell).strip().lower()
+    return str(cell).strip().lower() if cell else ""
 
 def map_header_to_std(h):
     h = (h or "").strip().lower()
@@ -93,40 +93,45 @@ def find_header_row(table):
             best_idx = i
     return best_idx
 
-
 # ----------------- TABLE PROCESSING -----------------
-def table_to_transactions(table, page_no=None):
+def table_to_transactions(table, meta, page_no=None):
     txns = []
     if not table or len(table) < 2:
         return txns
 
     header_idx = find_header_row(table)
     headers = table[header_idx]
-    std_headers = [map_header_to_std(normalize_header_cell(h)) or normalize_header_cell(h) for h in headers]
+
+    std_headers = []
+    for h in headers:
+        mapped = map_header_to_std(normalize_header_cell(h)) or normalize_header_cell(h)
+        std_headers.append(mapped)
 
     for row in table[header_idx + 1:]:
         row_cells = [c or "" for c in row]
         if all((not str(x).strip()) for x in row_cells):
             continue
+
         row_dict = {}
         for k, v in zip_longest(std_headers, row_cells, fillvalue=""):
             row_dict[k or "col"] = (v or "").strip()
 
-        date = row_dict.get("date") or None
-        particulars = row_dict.get("particulars") or None
+        date = row_dict.get("date") or row_dict.get("txn date") or row_dict.get("value date") or None
+        particulars = row_dict.get("particulars") or row_dict.get("description") or row_dict.get("narration") or row_dict.get("details") or None
 
         if not date:
             for cell in row_cells:
                 if DATE_RE.search(str(cell)):
                     date = DATE_RE.search(str(cell)).group(0)
                     break
+
+        # ✅ Don't alter Particulars — keep original text
         if not particulars:
-            text_cells = [str(c).strip() for c in row_cells if re.search(r'[A-Za-z]', str(c) or '')]
-            particulars = max(text_cells, key=len) if text_cells else ""
+            particulars = ""
 
         debit_amt = parse_amount(row_dict.get("debit") or "")
         credit_amt = parse_amount(row_dict.get("credit") or "")
-        balance_val = row_dict.get("balance") or None
+        balance_val = (row_dict.get("balance") or "").strip() or None
 
         if not (date and particulars and (debit_amt is not None or credit_amt is not None)):
             continue
@@ -135,7 +140,7 @@ def table_to_transactions(table, page_no=None):
 
         txns.append({
             "Date": str(date).strip(),
-            "Particulars": str(particulars).strip(),
+            "Particulars": str(particulars).strip(),  # ✅ EXACT same as in file
             "Debit": debit_amt,
             "Credit": credit_amt,
             "Head": head,
@@ -144,9 +149,8 @@ def table_to_transactions(table, page_no=None):
         })
     return txns
 
-
 # ----------------- TEXT FALLBACK -----------------
-def text_fallback_extract(page_text, page_no=None):
+def text_fallback_extract(page_text, meta, page_no=None):
     txns = []
     lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
     for ln in lines:
@@ -159,24 +163,41 @@ def text_fallback_extract(page_text, page_no=None):
         nums = [parse_amount(x) for x in amounts if parse_amount(x) is not None]
         if not nums:
             continue
+
         debit_amt, credit_amt, balance_val = None, None, None
         if len(nums) == 1:
-            debit_amt = nums[0]
+            if re.search(r'\b(debit|withdrawal|dr|withd)\b', ln, re.I):
+                debit_amt = nums[0]
+            elif re.search(r'\b(credit|deposit|cr)\b', ln, re.I):
+                credit_amt = nums[0]
+            else:
+                debit_amt = nums[0]
         elif len(nums) == 2:
-            debit_amt = nums[0]
+            if re.search(r'\b(debit|withdrawal|dr)\b', ln, re.I):
+                debit_amt = nums[0]
+            elif re.search(r'\b(credit|deposit|cr)\b', ln, re.I):
+                credit_amt = nums[0]
+            else:
+                debit_amt = nums[0]
             balance_val = str(nums[1])
         else:
             balance_val = str(nums[-1])
-            debit_amt = nums[-2]
+            amt_candidate = nums[-2]
+            if re.search(r'\b(debit|withdrawal|dr)\b', ln, re.I):
+                debit_amt = amt_candidate
+            elif re.search(r'\b(credit|deposit|cr)\b', ln, re.I):
+                credit_amt = amt_candidate
+            else:
+                debit_amt = amt_candidate
 
-        desc = re.sub(DATE_RE, '', ln)
-        desc = re.sub(AMOUNT_RE, '', desc)
-        desc = re.sub(r'\s{2,}', ' ', desc).strip()
+        # ✅ Keep full line as particulars (no stripping)
+        desc = ln
+
         head = classify_head(desc)
 
         txns.append({
             "Date": date,
-            "Particulars": desc,
+            "Particulars": desc,  # ✅ original line
             "Debit": debit_amt,
             "Credit": credit_amt,
             "Head": head,
@@ -185,30 +206,39 @@ def text_fallback_extract(page_text, page_no=None):
         })
     return txns
 
-
 # ----------------- MAIN API -----------------
 def process_file(file_bytes, filename):
+    meta = {"account_number": None, "name": None, "bank": None, "_logs": []}
     transactions = []
     try:
         pdf = pdfplumber.open(BytesIO(file_bytes))
-    except Exception:
-        return transactions
+    except Exception as e:
+        log(f"ERROR opening PDF: {e}", meta)
+        return meta, transactions
 
     with pdf:
+        log(f"PDF opened: {len(pdf.pages)} pages", meta)
         for p_idx, page in enumerate(pdf.pages, start=1):
+            log(f"--- Page {p_idx} ---", meta)
             try:
                 tables = page.extract_tables()
+                log(f"Found {len(tables)} tables on page {p_idx}", meta)
                 page_txns = []
-                for table in tables:
-                    tt = table_to_transactions(table, page_no=p_idx)
+                for t_idx, table in enumerate(tables, start=1):
+                    if not table or len(table) < 2:
+                        continue
+                    tt = table_to_transactions(table, meta, page_no=p_idx)
                     page_txns.extend(tt)
 
                 if not page_txns:
                     text = page.extract_text() or ""
-                    page_txns.extend(text_fallback_extract(text, page_no=p_idx))
+                    txt_tx = text_fallback_extract(text, meta, page_no=p_idx)
+                    page_txns.extend(txt_tx)
 
                 transactions.extend(page_txns)
-            except:
+
+            except Exception as e:
+                log(f"Error processing page {p_idx}: {e}", meta)
                 continue
 
     seen, deduped = set(), []
@@ -217,4 +247,7 @@ def process_file(file_bytes, filename):
         if key not in seen:
             seen.add(key)
             deduped.append(r)
-    return deduped
+
+    log(f"Total transactions (deduped): {len(deduped)}", meta)
+    meta["count"] = len(deduped)
+    return meta, deduped
