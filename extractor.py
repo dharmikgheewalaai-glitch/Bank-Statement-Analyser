@@ -6,17 +6,7 @@ import pdfplumber
 
 # ----------------- CONFIG -----------------
 HEAD_RULES = {
-    "BAJAJ FINANCE LTD": ["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"],
     "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
-    "CHARGES": ["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"],
-    "CONVEYANCE": ["PETROL", "PETROLEUM"],
-    "DIVIDEND": ["DIVIDEND"],
-    "ICICI DIRECT": ["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"],
-    "IDFC FIRST BANK LTD": ["IDFC FIRST BANK", "IDFCFBLIMITED"],
-    "INSURANCE": ["BAJAJ ALLIANZ GEN INS COM"],
-    "INTEREST": ["INT", "INTEREST"],
-    "LIC": ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"],
-    "TAX REFUND": ["TAX REFUND"],
     "SALARY": ["SALARY", "PAYROLL"],
     "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV"],
 }
@@ -68,6 +58,36 @@ def parse_amount(s):
 
 def classify_head(particulars):
     p = (particulars or "").upper()
+        if any(kw in p for kw in ["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"]):
+        return "BAJAJ FINANCE LTD"
+
+    if any(kw in p for kw in ["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"]):
+        return "CHARGES"
+
+    if any(kw in p for kw in ["PETROL", "PETROLEUM"]):
+        return "CONVEYANCE"
+
+    if any(kw in p for kw in ["DIVIDEND"]):
+        return "DIVIDEND"
+
+    if any(kw in p for kw in ["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"]):
+        return "ICICI DIRECT"
+
+    if any(kw in p for kw in ["IDFC FIRST BANK", "IDFCFBLIMITED"]):
+        return "IDFC FIRST BANK LTD"
+
+    if any(kw in p for kw in ["BAJAJ ALLIANZ GEN INS COM"]):
+        return "INSURANCE"
+
+    if any(kw in p for kw in ["INT", "INTEREST"]):
+        return "INTEREST"
+
+    if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
+        return "LIC"
+
+    if any(kw in p for kw in ["TAX REFUND"]):
+        return "TAX REFUND"
+
     for head, kws in HEAD_RULES.items():
         for kw in kws:
             if kw in p:
