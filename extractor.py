@@ -21,19 +21,19 @@ def classify_head(particulars):
         return "CHARGES"
     if any(kw in p for kw in ["PETROL", "PETROLEUM"]):
         return "CONVEYANCE"
-    if any(kw in p for kw in ["DIVIDEND"]):
+    if "DIVIDEND" in p:
         return "DIVIDEND"
     if any(kw in p for kw in ["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"]):
         return "ICICI DIRECT"
     if any(kw in p for kw in ["IDFC FIRST BANK", "IDFCFBLIMITED"]):
         return "IDFC FIRST BANK LTD"
-    if any(kw in p for kw in ["BAJAJ ALLIANZ GEN INS COM"]):
+    if "BAJAJ ALLIANZ GEN INS COM" in p:
         return "INSURANCE"
-    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
+     if "INT PD" in p or "INT CR" in p or "INTEREST" in p:
         return "INTEREST"
     if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
         return "LIC"
-    if any(kw in p for kw in ["TAX REFUND"]):
+    if "TAX REFUND" in p:
         return "TAX REFUND"
     for head, kws in HEAD_RULES.items():
         for kw in kws:
