@@ -11,7 +11,8 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Alignment, numbers
 
-st.title("📄 Bank Statement Analyser")
+st.set_page_config(page_title="Bank Statement Analyser", layout="wide")
+st.title("Bank Statement Analyser")
 
 uploaded_file = st.file_uploader("Upload Bank Statement (PDF)", type=["pdf"])
 
