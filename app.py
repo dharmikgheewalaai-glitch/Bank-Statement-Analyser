@@ -17,9 +17,11 @@ uploaded_file = st.file_uploader("Upload Bank Statement (PDF)", type=["pdf"])
 
 
 def clean_date(value):
+    """Convert any detected date into DD/MM/YYYY"""
     if not value:
         return None
-    text = str(value).strip().replace("'", "").replace('"', "")
+    text = str(value).strip()
+
     match = re.search(r"(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})", text)
     if match:
         d, m, y = match.groups()
@@ -30,10 +32,11 @@ def clean_date(value):
 
 
 def clean_amount(value):
+    """Make the amount a float with 2 decimals"""
     try:
-        return float(str(value).replace(",", "").strip())
+        return round(float(str(value).replace(",", "").strip()), 2)
     except:
-        return 0.0
+        return 0.00
 
 
 if uploaded_file is not None:
@@ -47,15 +50,14 @@ if uploaded_file is not None:
     else:
         df = pd.DataFrame(transactions)
 
-        # Clean Date
+        # Clean Date → DD/MM/YYYY
         if "Date" in df.columns:
             df["Date"] = df["Date"].apply(clean_date)
 
-        # Clean & normalize numeric columns (keep floats)
+        # Clean amount columns → numeric floats with 2 decimals
         for col in ["Debit", "Credit", "Balance"]:
             if col in df.columns:
                 df[col] = df[col].apply(clean_amount)
-                df[col] = df[col].round(2)
 
         # Swap Head and Balance if required
         cols = list(df.columns)
@@ -65,7 +67,7 @@ if uploaded_file is not None:
             cols[h], cols[b] = cols[b], cols[h]
             df = df[cols]
 
-        # Create display copy for Streamlit (2 decimals formatted)
+        # Display copy (Streamlit) → numbers remain floats but formatted
         df_display = df.copy()
         for col in ["Debit", "Credit", "Balance"]:
             if col in df_display.columns:
@@ -74,14 +76,14 @@ if uploaded_file is not None:
         st.success("Transactions Extracted Successfully!")
         st.dataframe(df_display, use_container_width=True)
 
-        # Base name for exported files
+        # Base filename
         base = uploaded_file.name.rsplit(".", 1)[0]
         csv_name = f"{base}.csv"
         xlsx_name = f"{base}.xlsx"
         pdf_name = f"{base}.pdf"
 
-        # CSV Export (rounded)
-        csv_bytes = df.round(2).to_csv(index=False).encode("utf-8")
+        # CSV Export → floats with 2 decimals
+        csv_bytes = df.to_csv(index=False, float_format="%.2f").encode("utf-8")
 
         # Excel Export
         excel_buffer = io.BytesIO()
@@ -92,15 +94,15 @@ if uploaded_file is not None:
         for row in dataframe_to_rows(df, index=False, header=True):
             ws.append(row)
 
-        # Apply alignment & numeric formatting
+        # Excel formatting
         for col in ws.iter_cols(min_col=1, max_col=ws.max_column, min_row=1):
             header = col[0].value
             for cell in col:
                 if header in ["Debit", "Credit", "Balance"] and cell.row > 1:
                     cell.alignment = Alignment(horizontal="right")
-                    cell.number_format = numbers.FORMAT_NUMBER_00
+                    cell.number_format = numbers.FORMAT_NUMBER_00  # 2 decimals
                 elif header in ["Particular", "Particulars"]:
-                    cell.alignment = Alignment(horizontal="left", vertical="top")
+                    cell.alignment = Alignment(horizontal="left")
                 elif header == "Date":
                     cell.alignment = Alignment(horizontal="center")
                 else:
@@ -109,7 +111,7 @@ if uploaded_file is not None:
         wb.save(excel_buffer)
         excel_buffer.seek(0)
 
-        # PDF Export (format with 2 decimals)
+        # PDF Export → force 2 decimal formatting
         df_pdf = df.copy()
         for col in ["Debit", "Credit", "Balance"]:
             if col in df_pdf.columns:
@@ -138,7 +140,6 @@ if uploaded_file is not None:
         doc.build(elements)
         pdf_buffer.seek(0)
 
-        # Download buttons
         col1, col2, col3 = st.columns(3)
 
         with col1:
