@@ -1,7 +1,5 @@
-# ================= requirements.txt =================
-
-pdfplumber
 streamlit
 pandas
 openpyxl
+pdfplumber
 reportlab
