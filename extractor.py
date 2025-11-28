@@ -25,7 +25,7 @@ IGNORE_PATTERNS = [
     r"computer generated",
     r"thank you",
     r"end of statement",
-    r"opening balance",
+    
     r"closing balance",
     r"transaction summary",
 ]
