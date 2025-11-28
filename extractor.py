@@ -4,6 +4,32 @@ from io import BytesIO
 from itertools import zip_longest
 import pdfplumber
 
+# ----------------- GLOBAL IGNORE LIST (BLOCK ALL HEADERS/FOOTERS) -----------------
+IGNORE_PATTERNS = [
+    r"statement of account",
+    r"account statement",
+    r"for the period",
+    r"period from",
+    r"statement period",
+    r"page\s+\d+\s+of\s+\d+",
+    r"printed on",
+    r"print date",
+    r"account number",
+    r"customer id",
+    r"ifsc",
+    r"micr",
+    r"branch",
+    r"available balance",
+    r"ledger balance",
+    r"dear customer",
+    r"computer generated",
+    r"thank you",
+    r"end of statement",
+    r"opening balance",
+    r"closing balance",
+    r"transaction summary",
+]
+
 # ----------------- CONFIG -----------------
 HEAD_RULES = {
     "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
@@ -13,24 +39,14 @@ HEAD_RULES = {
 
 HEADER_ALIASES = {
     "date": ["date", "txn date", "transaction date", "value date", "tran date"],
-    "particulars": ["particulars", "description", "narration",
-                    "transaction particulars", "details", "remarks"],
-    "debit": ["debit", "withdrawal", "dr", "withdrawal amt",
-              "withdrawal amount", "debit amount"],
-    "credit": ["credit", "deposit", "cr", "deposit amt",
-               "deposit amount", "credit amount"],
+    "particulars": ["particulars", "description", "narration", "transaction particulars", "details", "remarks"],
+    "debit": ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
+    "credit": ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
     "balance": ["balance", "running balance", "closing balance", "bal"]
 }
 
 DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
 AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
-
-IGNORE_PATTERNS = [
-    r"statement of account",
-    r"for the period from",
-    r"page\s+\d+\s+of\s+\d+",
-    r"printed on"
-]
 
 # ----------------- HELPERS -----------------
 def normalize_header_cell(cell):
@@ -134,10 +150,14 @@ def table_to_transactions(table, meta, page_no=None):
         std_headers.append(mapped)
 
     for row in table[header_idx + 1:]:
-        # ---- Normalize row length ----
+        # Skip header/footer text inside tables
+        if any(re.search(p, " ".join(str(x) for x in row), re.IGNORECASE) for p in IGNORE_PATTERNS):
+            continue
+
+        # Normalize row length
         if len(row) < len(headers):
             row = row + [""] * (len(headers) - len(row))
-        elif len(row) > len(headers):
+        if len(row) > len(headers):
             row = row[:len(headers)]
 
         row_cells = [c or "" for c in row]
@@ -150,12 +170,18 @@ def table_to_transactions(table, meta, page_no=None):
 
         date = row_dict.get("date") or None
         particulars = row_dict.get("particulars") or ""
-
         debit_amt = parse_amount(row_dict.get("debit") or "")
         credit_amt = parse_amount(row_dict.get("credit") or "")
         balance_val = parse_amount(row_dict.get("balance") or "")
 
-        if not (date and particulars and (debit_amt is not None or credit_amt is not None)):
+        # Skip invalid rows & table headers disguised as rows
+        if any(re.search(p, str(particulars), re.IGNORECASE) for p in IGNORE_PATTERNS):
+            continue
+
+        if not (date and particulars):
+            continue
+
+        if debit_amt is None and credit_amt is None:
             continue
 
         head = classify_head(particulars)
@@ -169,6 +195,7 @@ def table_to_transactions(table, meta, page_no=None):
             "Balance": balance_val,
             "Page": page_no
         })
+
     return txns
 
 
@@ -188,12 +215,12 @@ def text_fallback_extract(page_text, meta, page_no=None):
         if not amounts:
             continue
 
-        date = DATE_RE.search(ln).group(0)
         nums = [parse_amount(x) for x in amounts if parse_amount(x) is not None]
         if not nums:
             continue
 
-        debit_amt, credit_amt, balance_val = None, None, None
+        date = DATE_RE.search(ln).group(0)
+        debit_amt = credit_amt = balance_val = None
 
         if len(nums) == 1:
             debit_amt = nums[0]
@@ -243,7 +270,7 @@ def process_file(file_bytes, filename):
             except:
                 continue
 
-    # Deduplication
+    # Deduplicate
     seen, result = set(), []
     for r in transactions:
         key = (r["Date"], r["Particulars"], r["Debit"], r["Credit"], r["Page"])
