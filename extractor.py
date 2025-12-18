@@ -25,7 +25,6 @@ IGNORE_PATTERNS = [
     r"computer generated",
     r"thank you",
     r"end of statement",
-    
     r"closing balance",
     r"transaction summary",
 ]
@@ -34,7 +33,7 @@ IGNORE_PATTERNS = [
 HEAD_RULES = {
     "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
     "SALARY": ["SALARY", "PAYROLL"],
-    "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV"],
+    "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV", "POS"],
 }
 
 HEADER_ALIASES = {
