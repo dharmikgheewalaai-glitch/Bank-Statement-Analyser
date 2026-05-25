@@ -54,16 +54,64 @@ def show_summary(df):
 
     st.markdown("---")
 
-    # Head-wise breakdown
-    with st.expander("📊 Head-wise Breakdown"):
-        hw = df.groupby("Head").agg(
+    # Monthly Head-wise breakdown
+    with st.expander("📊 Monthly Head-wise Breakdown"):
+        df2 = df.copy()
+
+        # Parse Month from Date (DD/MM/YYYY)
+        def extract_month(d):
+            m = re.match(r"\d{1,2}/(\d{1,2})/(\d{4})", str(d or ""))
+            if m:
+                mo, yr = int(m.group(1)), m.group(2)
+                return f"{yr}-{mo:02d}"
+            return "Unknown"
+
+        df2["Month"] = df2["Date"].apply(extract_month)
+
+        months = sorted(df2["Month"].unique())
+        sel_month = st.selectbox("Select Month", ["All"] + months, key="month_sel")
+
+        if sel_month != "All":
+            df2 = df2[df2["Month"] == sel_month]
+
+        hw_raw = df2.groupby("Head").agg(
             Debit=("Debit", "sum"),
             Credit=("Credit", "sum"),
             Count=("Date", "count"),
         ).reset_index().sort_values("Debit", ascending=False)
+
+        hw = hw_raw.copy()
         hw["Debit"]  = hw["Debit"].map(lambda x: f"{x:,.2f}")
         hw["Credit"] = hw["Credit"].map(lambda x: f"{x:,.2f}")
         st.dataframe(hw, use_container_width=True)
+
+        label = sel_month if sel_month != "All" else "all"
+        dl_csv = hw_raw.to_csv(index=False, float_format="%.2f").encode("utf-8")
+
+        hw_xl = io.BytesIO()
+        wb2 = Workbook()
+        ws2 = wb2.active
+        ws2.title = "Monthly Head-wise"
+        for row in dataframe_to_rows(hw_raw, index=False, header=True):
+            ws2.append(row)
+        for col_cells in ws2.columns:
+            ws2.column_dimensions[col_cells[0].column_letter].width = max(
+                len(str(c.value or "")) for c in col_cells) + 2
+        wb2.save(hw_xl)
+        hw_xl.seek(0)
+
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            st.download_button("⬇️ Download CSV",
+                               data=dl_csv,
+                               file_name=f"headwise_{label}.csv",
+                               key="hw_csv")
+        with dc2:
+            st.download_button("⬇️ Download Excel",
+                               data=hw_xl,
+                               file_name=f"headwise_{label}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key="hw_xl")
 
 
 # ===================================================================
