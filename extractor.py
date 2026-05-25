@@ -34,12 +34,9 @@ IGNORE_PATTERNS = [
 
 # ── HEAD RULES ────────────────────────────────────────────────────────────────
 HEAD_RULES = {
-    "CASH":       ["ATM WDL", "CASH WDL", "CASH DEP", "CSH", "SELF"],
+    "CASH":       ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
     "SALARY":     ["SALARY", "PAYROLL"],
-    "UPI":        ["UPI"],
-    "NEFT/RTGS":  ["NEFT", "RTGS", "IMPS"],
-    "POS":        ["POS"],
-    "EMI":        ["EMI", "LOAN"],
+    "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV", "POS"],
 }
 
 HEADER_ALIASES = {
@@ -100,28 +97,26 @@ def is_ignore_line(text):
 def classify_head(particulars):
     p = str(particulars or "").upper()
 
-    # Specific entities first (priority over generic rules)
-    specific = [
-        (["BAJAJ FINANCE", "BAJAJFIN"],                  "BAJAJ FINANCE LTD"),
-        (["CGST", "SGST", "GST", "CHARGES", "CHGS", "CHRG", "SERVICE CHG"], "CHARGES"),
-        (["PETROL", "PETROLEUM", "FUEL"],                "CONVEYANCE"),
-        (["DIVIDEND"],                                   "DIVIDEND"),
-        (["ICICI SECURITIES", "ICICISEC"],               "ICICI DIRECT"),
-        (["IDFC FIRST BANK", "IDFCFBLIMITED"],           "IDFC FIRST BANK LTD"),
-        (["BAJAJ ALLIANZ GEN INS", "BAJAJALLIANZCGEIS"], "INSURANCE"),
-        (["INT PD", "INT CR", "INTEREST PAID", "INTEREST CREDITED", "INTEREST"], "INTEREST"),
-        (["LIC OF INDIA", "LIFE INSURANCE CORP"],        "LIC"),
-        (["IT REFUND", "TAX REFUND", "INCOME TAX REF"],  "TAX REFUND"),
-        (["MUTUAL FUND", "MF ", " MF", "AMFI"],          "MUTUAL FUND"),
-        (["INSURANCE", " INS ", "INSUR"],                "INSURANCE"),
-        (["AMAZON", "FLIPKART", "SWIGGY", "ZOMATO", "MYNTRA", "MEESHO"], "SHOPPING/FOOD"),
-        (["ELECTRICITY", "WATER BILL", "GAS BILL", "BESCOM", "MSEDCL",
-          "TORRENT POWER", "ADANI ELEC"],                "UTILITY"),
-        (["RECHARGE", "JIOMART", "AIRTEL", "VI ", "VODAFONE", "BSNL"], "RECHARGE"),
-    ]
-    for keywords, head in specific:
-        if any(kw in p for kw in keywords):
-            return head
+    if any(kw in p for kw in ["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"]):
+        return "BAJAJ FINANCE LTD"
+    if any(kw in p for kw in ["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"]):
+        return "CHARGES"
+    if any(kw in p for kw in ["PETROL", "PETROLEUM"]):
+        return "CONVEYANCE"
+    if "DIVIDEND" in p:
+        return "DIVIDEND"
+    if any(kw in p for kw in ["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"]):
+        return "ICICI DIRECT"
+    if any(kw in p for kw in ["IDFC FIRST BANK", "IDFCFBLIMITED"]):
+        return "IDFC FIRST BANK LTD"
+    if "BAJAJ ALLIANZ GEN INS COM" in p:
+        return "INSURANCE"
+    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
+        return "INTEREST"
+    if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
+        return "LIC"
+    if "TAX REFUND" in p:
+        return "TAX REFUND"
 
     for head, kws in HEAD_RULES.items():
         for kw in kws:
