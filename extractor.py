@@ -4,7 +4,7 @@ from io import BytesIO
 from itertools import zip_longest
 import pdfplumber
 
-# ----------------- GLOBAL IGNORE LIST (BLOCK ALL HEADERS/FOOTERS) -----------------
+# ------------- IGNORE PATTERNS -------------
 IGNORE_PATTERNS = [
     r"statement of account",
     r"account statement",
@@ -27,36 +27,38 @@ IGNORE_PATTERNS = [
     r"end of statement",
     r"closing balance",
     r"transaction summary",
+    r"^\s*date\s+particulars",
+    r"^\s*sr\.?\s*no",
 ]
 
-# ----------------- CONFIG -----------------
 HEAD_RULES = {
-    "CASH": ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
-    "SALARY": ["SALARY", "PAYROLL"],
+    "CASH":       ["ATM WDL", "CASH WDL", "CASH", "CSH", "SELF"],
+    "SALARY":     ["SALARY", "PAYROLL"],
     "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV", "POS"],
 }
 
 HEADER_ALIASES = {
-    "date": ["date", "txn date", "transaction date", "value date", "tran date"],
+    "date":        ["date", "txn date", "transaction date", "value date", "tran date"],
     "particulars": ["particulars", "description", "narration", "transaction particulars", "details", "remarks"],
-    "debit": ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
-    "credit": ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
-    "balance": ["balance", "running balance", "closing balance", "bal"]
+    "debit":       ["debit", "withdrawal", "dr", "withdrawal amt", "withdrawal amount", "debit amount"],
+    "credit":      ["credit", "deposit", "cr", "deposit amt", "deposit amount", "credit amount"],
+    "balance":     ["balance", "running balance", "bal"],
 }
 
-DATE_RE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
-AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[, ]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
+DATE_RE   = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}\b')
+AMOUNT_RE = re.compile(r'[-+]?\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?')
 
-# ----------------- HELPERS -----------------
-def normalize_header_cell(cell):
+
+# ------------- HELPERS -------------
+def normalize(cell):
     return str(cell).strip().lower() if cell else ""
 
 
-def map_header_to_std(h):
+def map_header(h):
     h = (h or "").strip().lower()
     for std, aliases in HEADER_ALIASES.items():
         for a in aliases:
-            if h.startswith(a) or a in h:
+            if h == a or h.startswith(a) or a in h:
                 return std
     return None
 
@@ -65,209 +67,187 @@ def parse_amount(s):
     if s is None:
         return None
     s = str(s).strip().replace('\xa0', ' ')
-    s = re.sub(r'[^\d\-,.\s]', '', s)
-    s = s.replace(' ', '').replace(',', '')
-    if s == '':
+    s = re.sub(r'[^\d\-,.\s]', '', s).replace(' ', '').replace(',', '')
+    if not s:
         return None
     try:
         return float(s)
-    except:
+    except ValueError:
         m = AMOUNT_RE.search(str(s))
         if m:
             try:
                 return float(m.group(0).replace(',', '').replace(' ', ''))
-            except:
-                return None
-        return None
+            except ValueError:
+                pass
+    return None
 
 
-# ----------------- HEAD CLASSIFICATION -----------------
+def is_ignore_row(row):
+    text = " ".join(str(x) for x in row if x)
+    return any(re.search(p, text, re.IGNORECASE) for p in IGNORE_PATTERNS)
+
+
+# ------------- HEAD CLASSIFICATION -------------
 def classify_head(particulars):
     p = str(particulars or "").upper()
-
-    if any(kw in p for kw in ["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"]):
-        return "BAJAJ FINANCE LTD"
-    if any(kw in p for kw in ["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"]):
-        return "CHARGES"
-    if any(kw in p for kw in ["PETROL", "PETROLEUM"]):
-        return "CONVEYANCE"
-    if "DIVIDEND" in p:
-        return "DIVIDEND"
-    if any(kw in p for kw in ["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"]):
-        return "ICICI DIRECT"
-    if any(kw in p for kw in ["IDFC FIRST BANK", "IDFCFBLIMITED"]):
-        return "IDFC FIRST BANK LTD"
-    if "BAJAJ ALLIANZ GEN INS COM" in p:
-        return "INSURANCE"
-    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
-        return "INTEREST"
-    if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
-        return "LIC"
-    if "TAX REFUND" in p:
-        return "TAX REFUND"
-
+    checks = [
+        (["BAJAJ FINANCE LIMITE", "BAJAJ FINANCE LTD", "BAJAJFIN"],    "BAJAJ FINANCE LTD"),
+        (["CGST", "CHARGES", "CHGS", "CHRG", "SGST", "GST"],           "CHARGES"),
+        (["PETROL", "PETROLEUM"],                                        "CONVEYANCE"),
+        (["DIVIDEND"],                                                   "DIVIDEND"),
+        (["ICICI SECURITIES LTD", "ICICISEC.UPI", "ICICISECURITIES"],   "ICICI DIRECT"),
+        (["IDFC FIRST BANK", "IDFCFBLIMITED"],                          "IDFC FIRST BANK LTD"),
+        (["BAJAJ ALLIANZ GEN INS"],                                      "INSURANCE"),
+        (["INT PD", "INT CR", "INTEREST"],                               "INTEREST"),
+        (["LIC OF INDIA", "LIFE INSURANCE CORPORATIO"],                  "LIC"),
+        (["TAX REFUND"],                                                  "TAX REFUND"),
+        (["EMI", "LOAN"],                                                 "LOAN EMI"),
+        (["RENT"],                                                        "RENT"),
+        (["SCHOOL", "COLLEGE", "TUITION", "FEES"],                       "EDUCATION"),
+        (["HOSPITAL", "MEDICAL", "PHARMA", "CLINIC"],                    "MEDICAL"),
+        (["AMAZON", "FLIPKART", "MYNTRA", "MEESHO", "SWIGGY", "ZOMATO",
+          "BLINKIT", "BIGBASKET"],                                        "ONLINE SHOPPING"),
+        (["NEFT", "RTGS", "IMPS"],                                       "TRANSFER"),
+    ]
+    for kws, head in checks:
+        if any(kw in p for kw in kws):
+            return head
     for head, kws in HEAD_RULES.items():
         for kw in kws:
             if kw in p:
                 return head
-
     return "OTHER"
 
 
-# ----------------- TABLE PROCESSING -----------------
+# ------------- TABLE EXTRACTION -------------
 def find_header_row(table):
     best_idx, best_score = 0, -1
-    for i, row in enumerate(table[:4]):
-        score = 0
-        for cell in row:
-            if not cell:
-                continue
-            c = str(cell).strip().lower()
-            for aliases in HEADER_ALIASES.values():
-                for a in aliases:
-                    if a in c:
-                        score += 3
-            if re.search(r'[a-zA-Z]', c):
-                score += 1
+    for i, row in enumerate(table[:5]):
+        score = sum(
+            3 for cell in row
+            if cell and any(
+                a in str(cell).strip().lower()
+                for aliases in HEADER_ALIASES.values()
+                for a in aliases
+            )
+        )
         if score > best_score:
-            best_idx = i
-            best_score = score
+            best_idx, best_score = i, score
     return best_idx
 
 
-def table_to_transactions(table, meta, page_no=None):
+def table_to_transactions(table, page_no=None):
     txns = []
     if not table or len(table) < 2:
         return txns
 
     header_idx = find_header_row(table)
-    headers = table[header_idx]
-
-    std_headers = []
-    for h in headers:
-        mapped = map_header_to_std(normalize_header_cell(h)) or normalize_header_cell(h)
-        std_headers.append(mapped)
+    raw_headers = table[header_idx]
+    std_headers = [map_header(normalize(h)) or normalize(h) for h in raw_headers]
 
     for row in table[header_idx + 1:]:
-        # Skip header/footer text inside tables
-        if any(re.search(p, " ".join(str(x) for x in row), re.IGNORECASE) for p in IGNORE_PATTERNS):
+        if is_ignore_row(row):
             continue
 
-        # Normalize row length
-        if len(row) < len(headers):
-            row = row + [""] * (len(headers) - len(row))
-        if len(row) > len(headers):
-            row = row[:len(headers)]
+        # Pad / trim row to header length
+        row = list(row) + [""] * max(0, len(std_headers) - len(row))
+        row = row[:len(std_headers)]
+        row = [str(c).strip() if c else "" for c in row]
 
-        row_cells = [c or "" for c in row]
-        if all((not str(x).strip()) for x in row_cells):
+        if not any(row):
             continue
 
-        row_dict = {}
-        for k, v in zip_longest(std_headers, row_cells, fillvalue=""):
-            row_dict[k or "col"] = (v or "").strip()
+        rd = {}
+        for k, v in zip_longest(std_headers, row, fillvalue=""):
+            rd[k or "col"] = v
 
-        date = row_dict.get("date") or None
-        particulars = row_dict.get("particulars") or ""
-        debit_amt = parse_amount(row_dict.get("debit") or "")
-        credit_amt = parse_amount(row_dict.get("credit") or "")
-        balance_val = parse_amount(row_dict.get("balance") or "")
+        date        = rd.get("date", "").strip() or None
+        particulars = rd.get("particulars", "").strip()
+        debit       = parse_amount(rd.get("debit", ""))
+        credit      = parse_amount(rd.get("credit", ""))
+        balance     = parse_amount(rd.get("balance", ""))
 
-        # Skip invalid rows & table headers disguised as rows
-        if any(re.search(p, str(particulars), re.IGNORECASE) for p in IGNORE_PATTERNS):
+        if not date or not particulars:
             continue
-
-        if not (date and particulars):
+        if not DATE_RE.search(date):
             continue
-
-        if debit_amt is None and credit_amt is None:
+        if debit is None and credit is None:
             continue
-
-        head = classify_head(particulars)
+        if is_ignore_row([particulars]):
+            continue
 
         txns.append({
-            "Date": str(date).strip(),
-            "Particulars": str(particulars).strip(),
-            "Debit": debit_amt,
-            "Credit": credit_amt,
-            "Head": head,
-            "Balance": balance_val,
-            "Page": page_no
+            "Date":        date,
+            "Particulars": particulars,
+            "Debit":       debit,
+            "Credit":      credit,
+            "Head":        classify_head(particulars),
+            "Balance":     balance,
+            "Page":        page_no,
         })
 
     return txns
 
 
-# ----------------- TEXT FALLBACK -----------------
-def text_fallback_extract(page_text, meta, page_no=None):
+# ------------- TEXT FALLBACK -------------
+def text_fallback_extract(page_text, page_no=None):
     txns = []
-    lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
-
-    for ln in lines:
-        if any(re.search(p, ln, re.IGNORECASE) for p in IGNORE_PATTERNS):
+    for ln in (l.strip() for l in page_text.splitlines() if l.strip()):
+        if is_ignore_row([ln]):
             continue
-
-        if not DATE_RE.search(ln):
+        m = DATE_RE.search(ln)
+        if not m:
             continue
-
-        amounts = AMOUNT_RE.findall(ln)
-        if not amounts:
-            continue
-
-        nums = [parse_amount(x) for x in amounts if parse_amount(x) is not None]
+        nums = [parse_amount(x) for x in AMOUNT_RE.findall(ln)]
+        nums = [n for n in nums if n is not None]
         if not nums:
             continue
 
-        date = DATE_RE.search(ln).group(0)
-        debit_amt = credit_amt = balance_val = None
-
+        date = m.group(0)
+        debit = credit = balance = None
         if len(nums) == 1:
-            debit_amt = nums[0]
+            debit = nums[0]
         elif len(nums) == 2:
-            debit_amt, balance_val = nums
-        elif len(nums) >= 3:
-            debit_amt, credit_amt, balance_val = nums[:3]
-
-        head = classify_head(ln)
+            debit, balance = nums
+        else:
+            debit, credit, balance = nums[0], nums[1], nums[-1]
 
         txns.append({
-            "Date": date,
+            "Date":        date,
             "Particulars": ln,
-            "Debit": debit_amt,
-            "Credit": credit_amt,
-            "Head": head,
-            "Balance": balance_val,
-            "Page": page_no
+            "Debit":       debit,
+            "Credit":      credit,
+            "Head":        classify_head(ln),
+            "Balance":     balance,
+            "Page":        page_no,
         })
-
     return txns
 
 
-# ----------------- MAIN API -----------------
+# ------------- MAIN API -------------
 def process_file(file_bytes, filename):
-    meta = {"_logs": []}
-    transactions = []
+    meta, transactions = {"_logs": []}, []
 
     try:
         pdf = pdfplumber.open(BytesIO(file_bytes))
-    except:
+    except Exception as e:
+        meta["_logs"].append(f"PDF open error: {e}")
         return meta, transactions
 
     with pdf:
         for idx, page in enumerate(pdf.pages, start=1):
             try:
-                tables = page.extract_tables()
                 page_txns = []
-                for table in tables:
-                    page_txns.extend(table_to_transactions(table, meta, page_no=idx))
+                for table in (page.extract_tables() or []):
+                    page_txns.extend(table_to_transactions(table, page_no=idx))
 
                 if not page_txns:
                     text = page.extract_text() or ""
-                    page_txns.extend(text_fallback_extract(text, meta, page_no=idx))
+                    page_txns.extend(text_fallback_extract(text, page_no=idx))
 
                 transactions.extend(page_txns)
-            except:
-                continue
+            except Exception as e:
+                meta["_logs"].append(f"Page {idx} error: {e}")
 
     # Deduplicate
     seen, result = set(), []
