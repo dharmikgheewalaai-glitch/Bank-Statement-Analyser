@@ -34,9 +34,9 @@ IGNORE_PATTERNS = [
 
 # ── HEAD RULES ────────────────────────────────────────────────────────────────
 HEAD_RULES = {
-    "CASH":       ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF"],
+    "CASH":       ["ATM WDL", "CASH", "CASH WDL", "CSH", "SELF", "ATMWDL", "CASHWDL"],
     "SALARY":     ["SALARY", "PAYROLL"],
-    "WITHDRAWAL": ["ATM ISSUER REV", "UPI", "UPI REV", "POS"],
+    "WITHDRAWAL": ["ATM ISSUER REV", "ATMISSUERREV", "UPI", "UPI REV", "UPIREV", "POS"],
 }
 
 HEADER_ALIASES = {
@@ -111,7 +111,7 @@ def classify_head(particulars):
         return "IDFC FIRST BANK LTD"
     if "BAJAJ ALLIANZ GEN INS COM" in p:
         return "INSURANCE"
-    if any(kw in p for kw in ["INT PD", "INT CR", "INTEREST"]):
+    if any(kw in p for kw in ["INT PD", "INT CR", "INT DR", "INTPD", "INTCR", "INTDR", "INTEREST"]):
         return "INTEREST"
     if any(kw in p for kw in ["LIC OF INDIA", "LIFE INSURANCE CORPORATIO", "LIFE INSURANCE CORPORATION OF INDIA"]):
         return "LIC"
