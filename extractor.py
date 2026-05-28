@@ -233,7 +233,7 @@ def table_to_transactions(table, meta, page_no=None):
         row_dict = {k: v for k, v in zip_longest(std_headers, row_cells, fillvalue="")}
 
         date        = row_dict.get("date", "").strip() or None
-        particulars = row_dict.get("particulars", "").strip()
+        particulars = re.sub(r"\s+", " ", str(row_dict.get("particulars", "") or "")).strip()
         debit_raw   = row_dict.get("debit", "")
         credit_raw  = row_dict.get("credit", "")
         balance_raw = row_dict.get("balance", "")
@@ -278,7 +278,7 @@ def table_to_transactions(table, meta, page_no=None):
 # ── TEXT FALLBACK ─────────────────────────────────────────────────────────────
 def text_fallback_extract(page_text, meta, page_no=None):
     txns = []
-    lines = [ln.strip() for ln in page_text.splitlines() if ln.strip()]
+    lines = [re.sub(r'\s+', ' ', ln.strip()) for ln in page_text.splitlines() if ln.strip()]
 
     for ln in lines:
         if is_ignore_line(ln):
