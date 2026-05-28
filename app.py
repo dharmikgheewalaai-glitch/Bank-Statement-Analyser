@@ -76,7 +76,7 @@ if uploaded_file is not None:
         df_final.drop(columns=["Page"], inplace=True)
 
     # Reorder: Date, Particulars, Debit, Credit, Balance, Head
-    preferred_order = ["Date", "Particulars", "Debit", "Credit", "Balance", "Head", "Name"]
+    preferred_order = ["Date", "Particulars", "Debit", "Credit", "Balance", "Head"]
     existing_cols = [c for c in preferred_order if c in df_final.columns]
     extra_cols = [c for c in df_final.columns if c not in existing_cols]
     df_final = df_final[existing_cols + extra_cols]
