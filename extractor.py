@@ -126,6 +126,62 @@ def classify_head(particulars):
     return "OTHER"
 
 
+# ── NAME / ACCOUNT EXTRACTION ─────────────────────────────────────────────────
+_ACNO_RE  = re.compile(r'\b(\d{9,18})\b')
+_IFSC_RE  = re.compile(r'\b([A-Z]{4}0[A-Z0-9]{6})\b')
+_UPI_RE   = re.compile(r'([\w.\-]+@[\w.\-]+)')
+_MOB_RE   = re.compile(r'\b([6-9]\d{9})\b')
+
+_NAME_SEP = re.compile(
+    r'(?:TO|BY|FROM|TRANSFER TO|TRANSFER FROM|PAYMENT TO|RECEIVED FROM|'
+    r'NEFT TO|NEFT FROM|RTGS TO|RTGS FROM|IMPS TO|IMPS FROM|'
+    r'UPI[-/ ]|UPI:|CR TO|DR TO|TRSF TO|TRSF FROM)[:\s/-]+',
+    re.IGNORECASE
+)
+_NOISE = re.compile(
+    r'\b(NEFT|RTGS|IMPS|UPI|REF|NO|REFNO|TXN|TRANSACTION|TRANSFER|'
+    r'PAYMENT|PAY|BANK|A/C|AC|ACNO|ACCOUNT|TOWARDS|BEING|AGAINST|'
+    r'CHARGES?|CHGS?|REVERSAL|REV|DEBIT|CREDIT|DR|CR|NULL|NA|NIL)\b',
+    re.IGNORECASE
+)
+
+def extract_name(particulars):
+    p = str(particulars or "").strip()
+
+    # 1. UPI VPA
+    m = _UPI_RE.search(p)
+    if m:
+        return m.group(1)
+
+    # 2. Mobile number
+    m = _MOB_RE.search(p)
+    if m:
+        return m.group(1)
+
+    # 3. Name after TO/BY/FROM keyword
+    m = _NAME_SEP.search(p)
+    if m:
+        candidate = p[m.end():].strip()
+        candidate = re.split(r'[/\|\\]|\s{2,}', candidate)[0].strip()
+        candidate = re.sub(r'\s*\d{6,}.*$', '', candidate).strip()
+        candidate = _NOISE.sub('', candidate).strip()
+        candidate = re.sub(r'\s+', ' ', candidate).strip(' -/')
+        if len(candidate) >= 3:
+            return candidate.title()
+
+    # 4. IFSC code
+    m = _IFSC_RE.search(p)
+    if m:
+        return m.group(1)
+
+    # 5. Account number
+    m = _ACNO_RE.search(p)
+    if m:
+        return m.group(1)
+
+    return ""
+
+
 # ── TABLE HEADER DETECTION ────────────────────────────────────────────────────
 def find_header_row(table):
     """Return index of the row most likely to be the column header row."""
@@ -211,6 +267,7 @@ def table_to_transactions(table, meta, page_no=None):
             "Debit":       debit_amt,
             "Credit":      credit_amt,
             "Head":        classify_head(particulars),
+            "Name":        extract_name(particulars),
             "Balance":     balance_val,
             "Page":        page_no,
         })
@@ -258,6 +315,7 @@ def text_fallback_extract(page_text, meta, page_no=None):
             "Debit":       debit_amt,
             "Credit":      credit_amt,
             "Head":        classify_head(ln),
+            "Name":        extract_name(ln),
             "Balance":     balance_val,
             "Page":        page_no,
         })
