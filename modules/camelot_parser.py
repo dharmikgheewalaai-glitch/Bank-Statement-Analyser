@@ -26,6 +26,8 @@ def extract_with_camelot(path):
             for table in tables:
                 df = table.df
                 if df is not None and not df.empty:
+                    df.columns = df.iloc[0]
+                    df = df[1:].reset_index(drop=True)
                     frames.append(df)
         except Exception as e:
             errors.append(f"{flavor}: {e}")

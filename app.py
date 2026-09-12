@@ -93,7 +93,10 @@ with history:
     st.subheader("Processing History")
     rows = all_history()
     hist = pd.DataFrame(rows, columns=["File","Processed At","Transactions","Method","Confidence"])
-    st.dataframe(hist, use_container_width=True, hide_index=True) if not hist.empty else st.info("No history yet.")
+    if not hist.empty:
+        st.dataframe(hist, use_container_width=True, hide_index=True)
+    else:
+        st.info("No history yet.")
 
 with rules_tab:
     st.subheader("Heads")
