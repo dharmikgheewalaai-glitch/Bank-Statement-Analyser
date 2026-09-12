@@ -84,6 +84,50 @@ def _cluster_header_columns(header_row, col_gap=10):
     return cols
 
 
+def build_grid_from_words(words):
+    """Rebuild the page as a raw grid (list of row cell-lists), using the
+    same word-position column clustering as detect_word_table, but WITHOUT
+    doing header detection, row merging, or junk filtering ourselves —
+    table_to_transactions() owns that (find_header_row + IGNORE_PATTERNS)."""
+    if not words:
+        return []
+    rows = _group_rows(words)
+    header_row = None
+    for row in rows:
+        low = " ".join(w[4] for w in row).lower()
+        hits = sum(k in low for k in HEADER_KEYWORDS)
+        if hits >= 3:
+            header_row = row
+            break
+    if header_row is None:
+        return []
+
+    cols = _cluster_header_columns(header_row)
+    if len(cols) < 3:
+        return []
+
+    boundaries = [float("-inf")]
+    for a, b in zip(cols, cols[1:]):
+        boundaries.append((a["x1"] + b["x0"]) / 2)
+    boundaries.append(float("inf"))
+
+    def col_index(cx):
+        for i in range(len(boundaries) - 1):
+            if boundaries[i] <= cx < boundaries[i + 1]:
+                return i
+        return len(cols) - 1
+
+    grid = []
+    for row in rows:
+        cells = [""] * len(cols)
+        for w in row:
+            cx = (w[0] + w[2]) / 2
+            idx = col_index(cx)
+            cells[idx] = (cells[idx] + " " + w[4]).strip()
+        grid.append(cells)
+    return grid
+
+
 def detect_word_table(words):
     """Primary extractor: reconstruct columns from PyMuPDF word bounding boxes
     instead of trusting whitespace-gap heuristics or Camelot's grid guess.

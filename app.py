@@ -51,7 +51,7 @@ with st.sidebar:
         temp.write_bytes(upload.getbuffer())
         try:
             if suffix == ".pdf":
-                df, meta = parse_pdf(str(temp), mode=detect_mode)
+                df, meta = parse_pdf(str(temp), mode=detect_mode, rules=st.session_state.rules)
             elif suffix == ".csv":
                 df, meta = normalize(pd.read_csv(temp)), {"method":"CSV","validation":{"score":100}}
             else:
@@ -63,24 +63,20 @@ with st.sidebar:
                                  st.session_state.journal_heads,
                                  st.session_state.bank_account)
             st.session_state.df = df
-            score = meta.get("validation",{}).get("score",100)
+            score = meta.get("validation",{}).get("score", 100 if len(df) else 0)
             add(upload.name, len(df), meta.get("method","Unknown"), score)
             st.success(f"{len(df)} transactions processed")
-            st.caption(f"Method: {meta.get('method')} | Validation: {score}%")
-            if meta.get("layout"):
-                st.caption(f"Detected: {meta['layout'].get('name')} ({meta['layout'].get('confidence')}%)")
+            st.caption(f"Method: {meta.get('method')}")
             if meta.get("page"):
                 st.caption(f"Header matched on page {meta['page']}")
             dbg = meta.get("debug")
             if dbg and len(df) == 0:
                 st.warning(
                     f"Raw columns detected: {dbg.get('raw_columns')}\n\n"
-                    f"Matched columns → Date: `{dbg['matched']['date']}` | "
-                    f"Particulars: `{dbg['matched']['particulars']}` | "
-                    f"Debit: `{dbg['matched']['debit']}` | Credit: `{dbg['matched']['credit']}`\n\n"
-                    f"Raw rows before date filter: {dbg['raw_rows']} | "
-                    f"Rows that failed date parse: {dbg['date_parse_fail']}\n\n"
-                    f"Sample raw date values: {dbg['sample_raw_dates']}"
+                    f"Pages with a table found: {dbg.get('pages_with_table')} | "
+                    f"Pages that yielded transactions: {dbg.get('pages_with_transactions')}\n\n"
+                    f"Rows extracted before date filter: {dbg.get('raw_rows')} | "
+                    f"Rows that failed date parse: {dbg.get('date_parse_fail')}"
                 )
         except Exception as e:
             st.error(f"Processing failed: {e}")

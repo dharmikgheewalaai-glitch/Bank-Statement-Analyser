@@ -1,69 +1,82 @@
 import pandas as pd
 from .text_extractor import extract_pages
-from .table_detector import detect_text_table, detect_word_table
-from .table_validator import validate_table
+from .table_detector import build_grid_from_words, detect_text_table
 from .camelot_parser import extract_with_camelot
-from .normalizer import normalize_debug
+from .transaction_extractor import table_to_transactions
 
-def _smart_text(path):
-    """Word-position + regex-line text extraction only, no Camelot."""
-    frames, detections = [], []
+def _txns_to_df(txns):
+    cols = ["Date","Particulars","Debit","Credit","Head","Balance","Page"]
+    if not txns:
+        return pd.DataFrame(columns=cols)
+    df = pd.DataFrame(txns)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+    parse_fail = int(df["Date"].isna().sum())
+    df = df.dropna(subset=["Date"]).reset_index(drop=True)
+    return df, parse_fail
+
+def _grid_for_page(page):
+    grid = build_grid_from_words(page.get("words", []))
+    if grid:
+        return grid, "word-position"
+    df_legacy, meta_legacy = detect_text_table(page["text"])
+    if not df_legacy.empty:
+        grid = [list(df_legacy.columns)] + df_legacy.astype(str).values.tolist()
+        return grid, "line-regex"
+    return [], None
+
+def _smart_text(path, rules=None):
+    all_txns, pages_used, methods, raw_grids = [], [], set(), []
     for pno, page in enumerate(extract_pages(path), 1):
-        df, meta = detect_word_table(page.get("words", []))
-        if df.empty:
-            df, meta = detect_text_table(page["text"])
-        if not df.empty:
-            meta["page"] = pno
-            frames.append(df)
-            detections.append(meta)
-    if not frames:
-        return pd.DataFrame(), {}, {}
-    raw = pd.concat(frames, ignore_index=True)
-    validation = validate_table(raw)
-    layout = detections[0].get("layout", {})
-    method = detections[0].get("method", "Smart text")
-    return raw, validation, {"layout": layout, "method": method, "page": detections[0].get("page")}
+        grid, method = _grid_for_page(page)
+        if grid:
+            raw_grids.append((pno, grid))
+        if grid:
+            txns = table_to_transactions(grid, page_no=pno, rules=rules)
+            if txns:
+                all_txns.extend(txns)
+                pages_used.append(pno)
+                if method:
+                    methods.add(method)
+    out, parse_fail = _txns_to_df(all_txns)
+    debug = {
+        "raw_columns": raw_grids[0][1][0] if raw_grids else None,
+        "pages_with_table": [p for p, _ in raw_grids],
+        "pages_with_transactions": pages_used,
+        "raw_rows": len(all_txns),
+        "date_parse_fail": parse_fail,
+    }
+    label = "Smart text (" + "+".join(sorted(methods)) + ")" if methods else "Smart text"
+    return out, {"method": label, "fallback": False, "debug": debug,
+                 "page": pages_used[0] if pages_used else None}
 
-def _camelot(path, flavors):
+def _camelot(path, flavors, label, rules=None):
     raw, errors = extract_with_camelot(path, flavors=flavors)
-    validation = validate_table(raw)
-    return raw, validation, {"camelot_errors": errors}
+    if raw.empty:
+        return pd.DataFrame(columns=["Date","Particulars","Debit","Credit","Head","Balance","Page"]), {
+            "method": label, "fallback": True, "camelot_errors": errors,
+            "debug": {"raw_columns": None, "raw_rows": 0, "date_parse_fail": 0}
+        }
+    grid = [list(raw.columns)] + raw.astype(str).values.tolist()
+    txns = table_to_transactions(grid, rules=rules)
+    out, parse_fail = _txns_to_df(txns)
+    debug = {"raw_columns": grid[0], "raw_rows": len(txns), "date_parse_fail": parse_fail}
+    return out, {"method": label, "fallback": True, "camelot_errors": errors, "debug": debug}
 
-def parse_pdf(path, mode="auto"):
+def parse_pdf(path, mode="auto", rules=None):
     """
     mode: "auto" (smart text, fallback to camelot both flavors)
-          "smart_text" (word-position/text-line only, no camelot)
+          "smart_text" (word-position/text-line grid only, no camelot)
           "lattice" (camelot lattice only)
           "stream" (camelot stream only)
     """
     if mode == "lattice":
-        raw, validation, extra = _camelot(path, ("lattice",))
-        out, debug = normalize_debug(raw)
-        return out, {"method":"Camelot (lattice)","fallback":True,"layout":{},
-                      "validation":validation,"debug":debug, **extra}
-
+        return _camelot(path, ("lattice",), "Camelot (lattice)", rules)
     if mode == "stream":
-        raw, validation, extra = _camelot(path, ("stream",))
-        out, debug = normalize_debug(raw)
-        return out, {"method":"Camelot (stream)","fallback":True,"layout":{},
-                      "validation":validation,"debug":debug, **extra}
-
+        return _camelot(path, ("stream",), "Camelot (stream)", rules)
     if mode == "smart_text":
-        raw, validation, extra = _smart_text(path)
-        out, debug = normalize_debug(raw) if not raw.empty else (pd.DataFrame(), {})
-        return out, {"method":extra.get("method","Smart text"),"fallback":False,
-                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug,
-                      "page":extra.get("page")}
+        return _smart_text(path, rules)
 
-    # auto: try smart text first, fall back to camelot (both flavors) if weak
-    raw, validation, extra = _smart_text(path)
-    if not raw.empty and validation.get("ok") and extra.get("layout",{}).get("confidence",0) >= 60:
-        out, debug = normalize_debug(raw)
-        return out, {"method":extra.get("method","Text-first"),"fallback":False,
-                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug,
-                      "page":extra.get("page")}
-
-    raw, validation, extra = _camelot(path, ("lattice","stream"))
-    out, debug = normalize_debug(raw)
-    return out, {"method":"Camelot fallback","fallback":True,"layout":{},
-                  "validation":validation,"debug":debug, **extra}
+    out, meta = _smart_text(path, rules)
+    if not out.empty:
+        return out, meta
+    return _camelot(path, ("lattice", "stream"), "Camelot fallback", rules)
