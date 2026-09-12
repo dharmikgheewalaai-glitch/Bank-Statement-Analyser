@@ -102,7 +102,7 @@ with dashboard:
             st.line_chart(m.set_index("Month")[["Income","Expenses"]])
 
         st.subheader("Transactions")
-        edited = st.data_editor(df, use_container_width=True, num_rows="dynamic")
+        edited = st.data_editor(df, width="stretch", num_rows="dynamic")
         st.session_state.df = edited
 
         st.download_button("⬇️ Download Excel",
@@ -115,7 +115,7 @@ with history:
     rows = all_history()
     hist = pd.DataFrame(rows, columns=["File","Processed At","Transactions","Method","Confidence"])
     if not hist.empty:
-        st.dataframe(hist, use_container_width=True, hide_index=True)
+        st.dataframe(hist, width="stretch", hide_index=True)
     else:
         st.info("No history yet.")
 
