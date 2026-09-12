@@ -2,6 +2,19 @@ from pathlib import Path
 import pandas as pd
 
 
+def dedupe_header(row):
+    seen, out = {}, []
+    for v in row:
+        h = str(v).strip() or "col"
+        if h in seen:
+            seen[h] += 1
+            h = f"{h}.{seen[h]}"
+        else:
+            seen[h] = 0
+        out.append(h)
+    return out
+
+
 def extract_with_camelot(path):
     """
     Secondary/fallback extractor.
@@ -26,7 +39,7 @@ def extract_with_camelot(path):
             for table in tables:
                 df = table.df
                 if df is not None and not df.empty:
-                    df.columns = df.iloc[0]
+                    df.columns = dedupe_header(df.iloc[0])
                     df = df[1:].reset_index(drop=True)
                     frames.append(df)
         except Exception as e:
