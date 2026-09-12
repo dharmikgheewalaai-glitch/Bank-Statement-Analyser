@@ -14,4 +14,4 @@ def classify(particulars, rules):
     for head, keywords in rules.items():
         if any(str(k).lower() in text for k in keywords):
             return head
-    return "Uncategorized"
+    return "Others"

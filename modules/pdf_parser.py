@@ -7,7 +7,7 @@ from .transaction_extractor import table_to_transactions
 def _txns_to_df(txns):
     cols = ["Date","Particulars","Debit","Credit","Head","Balance","Page"]
     if not txns:
-        return pd.DataFrame(columns=cols)
+        return pd.DataFrame(columns=cols), 0
     df = pd.DataFrame(txns)
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
     parse_fail = int(df["Date"].isna().sum())

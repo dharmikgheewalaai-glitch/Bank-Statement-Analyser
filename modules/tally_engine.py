@@ -11,6 +11,13 @@ def apply_tally(df, accounts, journal_heads, bank_account_name):
         debit, credit = float(row["Debit"] or 0), float(row["Credit"] or 0)
         low = head.lower()
 
+        if low == "others":
+            vtype, account, bank = "", "", ""
+            out.at[i,"v-Type"] = vtype
+            out.at[i,"Accounts"] = account
+            out.at[i,"Bank Name"] = bank
+            continue
+
         if low in journal:
             vtype = "Journal"
         elif "cash" in low:

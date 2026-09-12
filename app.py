@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 
-from database.database import init, add, all_history
+from database.database import init, add, all_history, get_history_data, delete_history
 from modules.pdf_parser import parse_pdf
 from modules.normalizer import normalize
 from modules.head_rules import DEFAULT_RULES, classify
@@ -64,7 +64,8 @@ with st.sidebar:
                                  st.session_state.bank_account)
             st.session_state.df = df
             score = meta.get("validation",{}).get("score", 100 if len(df) else 0)
-            add(upload.name, len(df), meta.get("method","Unknown"), score)
+            add(upload.name, len(df), meta.get("method","Unknown"), score,
+                df.to_json(orient="records", date_format="iso"))
             st.success(f"{len(df)} transactions processed")
             st.caption(f"Method: {meta.get('method')}")
             if meta.get("page"):
@@ -113,18 +114,63 @@ with dashboard:
 with history:
     st.subheader("Processing History")
     rows = all_history()
-    hist = pd.DataFrame(rows, columns=["File","Processed At","Transactions","Method","Confidence"])
-    if not hist.empty:
-        st.dataframe(hist, width="stretch", hide_index=True)
-    else:
+    if not rows:
         st.info("No history yet.")
+    else:
+        hist = pd.DataFrame(rows, columns=["id","File","Processed At","Transactions","Method","Confidence"])
+        header = st.columns([2.5,2,1,1.5,1,1,1])
+        for col, label in zip(header, ["File","Processed At","Txns","Method","Conf.","",""]):
+            col.markdown(f"**{label}**")
+        for _, r in hist.iterrows():
+            c = st.columns([2.5,2,1,1.5,1,1,1])
+            c[0].write(r["File"])
+            c[1].write(r["Processed At"])
+            c[2].write(int(r["Transactions"]))
+            c[3].write(r["Method"])
+            c[4].write(f"{r['Confidence']}%")
+            if c[5].button("Open", key=f"open_{r['id']}"):
+                data = get_history_data(int(r["id"]))
+                if data:
+                    st.session_state.df = pd.read_json(data, orient="records")
+                    st.success(f"Loaded '{r['File']}' into Dashboard tab.")
+                else:
+                    st.warning("No saved data for this row (processed before this feature was added).")
+            if c[6].button("🗑️ Delete", key=f"del_{r['id']}"):
+                delete_history(int(r["id"]))
+                st.rerun()
 
 with rules_tab:
     st.subheader("Heads")
-    st.caption("Keywords determine the Head. Changes apply to the next processing run.")
+    st.caption("Keywords determine the Head. Edit keywords inline; rename or delete a Head with the buttons.")
+    head_to_delete, head_to_rename = None, None
     for head in list(st.session_state.rules):
-        text = st.text_input(head, ", ".join(st.session_state.rules[head]), key=f"head_{head}")
-        st.session_state.rules[head] = [x.strip() for x in text.split(",") if x.strip()]
+        c1, c2, c3, c4 = st.columns([2, 3, 1, 1])
+        with c1:
+            new_name = st.text_input("Head name", head, key=f"headname_{head}", label_visibility="collapsed")
+        with c2:
+            kw_text = st.text_input("Keywords", ", ".join(st.session_state.rules[head]),
+                                     key=f"headkw_{head}", label_visibility="collapsed")
+            st.session_state.rules[head] = [x.strip() for x in kw_text.split(",") if x.strip()]
+        with c3:
+            if st.button("Rename", key=f"headrename_{head}") and new_name and new_name != head:
+                head_to_rename = (head, new_name)
+        with c4:
+            if st.button("🗑️ Delete", key=f"headdel_{head}"):
+                head_to_delete = head
+
+    if head_to_delete:
+        st.session_state.rules.pop(head_to_delete, None)
+        st.session_state.accounts.pop(head_to_delete, None)
+        st.session_state.journal_heads = [h for h in st.session_state.journal_heads if h != head_to_delete]
+        st.rerun()
+
+    if head_to_rename:
+        old, new = head_to_rename
+        st.session_state.rules[new] = st.session_state.rules.pop(old)
+        if old in st.session_state.accounts:
+            st.session_state.accounts[new] = st.session_state.accounts.pop(old)
+        st.session_state.journal_heads = [new if h == old else h for h in st.session_state.journal_heads]
+        st.rerun()
 
     st.divider()
     st.subheader("Add Head")
@@ -139,18 +185,62 @@ with rules_tab:
 
     st.divider()
     st.subheader("Accounts")
+    st.caption("Tally ledger name mapped from each key. Edit the value to rename; add extra keys as needed.")
     for head in st.session_state.rules:
-        st.session_state.accounts[head] = st.text_input(
-            f"Tally Account for {head}",
-            st.session_state.accounts.get(head, head),
-            key=f"account_{head}"
-        )
+        if head not in st.session_state.accounts:
+            st.session_state.accounts[head] = head
+
+    acc_to_delete = None
+    for acc_key in list(st.session_state.accounts):
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            val = st.text_input(f"Account for '{acc_key}'", st.session_state.accounts[acc_key], key=f"acc_{acc_key}")
+            st.session_state.accounts[acc_key] = val
+        with c2:
+            if acc_key not in st.session_state.rules and st.button("🗑️ Delete", key=f"accdel_{acc_key}"):
+                acc_to_delete = acc_key
+    if acc_to_delete:
+        st.session_state.accounts.pop(acc_to_delete, None)
+        st.rerun()
+
+    st.markdown("**Add Account**")
+    c1, c2 = st.columns([4, 1])
+    with c1: new_acc_key = st.text_input("Key (Head name or custom ledger key)", key="new_acc_key")
+    with c2:
+        if st.button("Add Account"):
+            if new_acc_key:
+                st.session_state.accounts[new_acc_key] = new_acc_key
+                st.rerun()
 
     st.divider()
     st.subheader("Journal")
-    journal_text = st.text_area("Journal Heads (comma separated)",
-                                ", ".join(st.session_state.journal_heads))
-    st.session_state.journal_heads = [x.strip() for x in journal_text.split(",") if x.strip()]
+    st.caption("Heads listed here get v-Type = Journal in Tally mode.")
+    jh_to_delete = None
+    if st.session_state.journal_heads:
+        hc = st.columns([4,1])
+        hc[0].markdown("**Head**")
+        for jh in list(st.session_state.journal_heads):
+            c1, c2 = st.columns([4,1])
+            c1.write(jh)
+            with c2:
+                if st.button("🗑️ Delete", key=f"jhdel_{jh}"):
+                    jh_to_delete = jh
+    else:
+        st.info("No journal heads yet.")
+    if jh_to_delete:
+        st.session_state.journal_heads.remove(jh_to_delete)
+        st.rerun()
+
+    st.markdown("**Add Journal Head**")
+    options = [h for h in st.session_state.rules if h not in st.session_state.journal_heads]
+    c1, c2 = st.columns([4,1])
+    with c1:
+        pick = st.selectbox("Head", options, key="journal_pick") if options else None
+    with c2:
+        if st.button("Add", key="add_journal"):
+            if pick:
+                st.session_state.journal_heads.append(pick)
+                st.rerun()
 
     st.divider()
     st.subheader("Bank Account")
