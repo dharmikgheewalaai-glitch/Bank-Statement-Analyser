@@ -15,11 +15,12 @@ def dedupe_header(row):
     return out
 
 
-def extract_with_camelot(path):
+def extract_with_camelot(path, flavors=("lattice", "stream")):
     """
     Secondary/fallback extractor.
     Camelot is imported lazily so CSV/Excel/text-first workflows do not fail
     just because Camelot is unavailable.
+    flavors: which Camelot flavor(s) to try, e.g. ("lattice",) or ("stream",).
     """
     try:
         import camelot
@@ -29,7 +30,7 @@ def extract_with_camelot(path):
     frames = []
     errors = []
 
-    for flavor in ("lattice", "stream"):
+    for flavor in flavors:
         try:
             tables = camelot.read_pdf(
                 str(Path(path)),

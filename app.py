@@ -27,6 +27,18 @@ st.title("🏦 Bank Statement Analyzer")
 with st.sidebar:
     st.header("Statement")
     upload = st.file_uploader("Upload PDF / CSV / Excel", type=["pdf","csv","xlsx","xls"])
+    mode_label = st.selectbox(
+        "Table detection mode",
+        ["Auto (recommended)", "Smart text (auto-detect layout)",
+         "Lattice (camelot — grid lines)", "Stream (camelot — whitespace)"],
+    )
+    mode_map = {
+        "Auto (recommended)": "auto",
+        "Smart text (auto-detect layout)": "smart_text",
+        "Lattice (camelot — grid lines)": "lattice",
+        "Stream (camelot — whitespace)": "stream",
+    }
+    detect_mode = mode_map[mode_label]
     tally = st.checkbox("Tally Output Mode")
     bank_account = st.text_input("Bank Account Name as per Tally",
                                   value=st.session_state.bank_account,
@@ -39,7 +51,7 @@ with st.sidebar:
         temp.write_bytes(upload.getbuffer())
         try:
             if suffix == ".pdf":
-                df, meta = parse_pdf(str(temp))
+                df, meta = parse_pdf(str(temp), mode=detect_mode)
             elif suffix == ".csv":
                 df, meta = normalize(pd.read_csv(temp)), {"method":"CSV","validation":{"score":100}}
             else:
