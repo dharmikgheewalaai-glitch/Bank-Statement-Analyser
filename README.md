@@ -32,3 +32,19 @@ git push -u origin main
 ```
 
 For Streamlit Community Cloud, select `app.py` as the entry point.
+
+
+## Streamlit Community Cloud deployment fix
+
+The previous build used `camelot-py[cv]`, which can pull GUI/OpenCV dependencies that are
+unnecessary for this server-side application. This version uses `camelot-py==2.0.0` without
+the optional CV extra and imports Camelot lazily only when the text-first extractor needs a
+fallback.
+
+Files added/changed:
+- `requirements.txt` — Cloud-safe dependency set
+- `runtime.txt` — Python 3.12 consistency hint
+- `modules/camelot_parser.py` — lazy Camelot import + Camelot 2.x-compatible fallback
+
+Streamlit Community Cloud reads Python dependencies from `requirements.txt` and can use
+`packages.txt` for Linux/apt dependencies when needed.
