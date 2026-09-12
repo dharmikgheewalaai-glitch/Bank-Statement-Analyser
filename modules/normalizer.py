@@ -16,7 +16,7 @@ def find_col(columns, aliases):
         if any(a in c for a in aliases): return col
     return None
 
-def normalize(df):
+def normalize_debug(df):
     cols = list(df.columns)
     date_col = find_col(cols, ALIASES["date"])
     part_col = find_col(cols, ALIASES["particulars"])
@@ -38,6 +38,20 @@ def normalize(df):
             out["Debit"] = raw.map(lambda x: money(x) if "DR" in x.upper() else 0.0)
             out["Credit"] = raw.map(lambda x: money(x) if "CR" in x.upper() else 0.0)
 
-    out["Date"] = pd.to_datetime(out["Date"], errors="coerce", dayfirst=True)
+    raw_dates = out["Date"].head(5).tolist()
+    parsed = pd.to_datetime(out["Date"], errors="coerce", dayfirst=True)
+    debug = {
+        "raw_columns": cols,
+        "matched": {"date":date_col,"particulars":part_col,"debit":debit_col,
+                    "credit":credit_col,"balance":balance_col},
+        "raw_rows": len(out),
+        "date_parse_fail": int(parsed.isna().sum()),
+        "sample_raw_dates": raw_dates,
+    }
+    out["Date"] = parsed
     out = out.dropna(subset=["Date"]).reset_index(drop=True)
+    return out, debug
+
+def normalize(df):
+    out, _ = normalize_debug(df)
     return out

@@ -57,6 +57,16 @@ with st.sidebar:
             st.caption(f"Method: {meta.get('method')} | Validation: {score}%")
             if meta.get("layout"):
                 st.caption(f"Detected: {meta['layout'].get('name')} ({meta['layout'].get('confidence')}%)")
+            dbg = meta.get("debug")
+            if dbg and len(df) == 0:
+                st.warning(
+                    f"Matched columns → Date: `{dbg['matched']['date']}` | "
+                    f"Particulars: `{dbg['matched']['particulars']}` | "
+                    f"Debit: `{dbg['matched']['debit']}` | Credit: `{dbg['matched']['credit']}`\n\n"
+                    f"Raw rows before date filter: {dbg['raw_rows']} | "
+                    f"Rows that failed date parse: {dbg['date_parse_fail']}\n\n"
+                    f"Sample raw date values: {dbg['sample_raw_dates']}"
+                )
         except Exception as e:
             st.error(f"Processing failed: {e}")
 

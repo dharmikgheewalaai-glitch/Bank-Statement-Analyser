@@ -3,7 +3,7 @@ from .text_extractor import extract_pages
 from .table_detector import detect_text_table
 from .table_validator import validate_table
 from .camelot_parser import extract_with_camelot
-from .normalizer import normalize
+from .normalizer import normalize_debug
 
 def parse_pdf(path):
     frames, detections = [], []
@@ -18,19 +18,23 @@ def parse_pdf(path):
         validation = validate_table(raw)
         layout = detections[0].get("layout", {}) if detections else {}
         if validation["ok"] and layout.get("confidence", 0) >= 60:
-            return normalize(raw), {
+            out, debug = normalize_debug(raw)
+            return out, {
                 "method":"Text-first",
                 "fallback":False,
                 "layout":layout,
-                "validation":validation
+                "validation":validation,
+                "debug":debug
             }
 
     raw, errors = extract_with_camelot(path)
     validation = validate_table(raw)
-    return normalize(raw), {
+    out, debug = normalize_debug(raw)
+    return out, {
         "method":"Camelot fallback",
         "fallback":True,
         "layout":{},
         "validation":validation,
-        "camelot_errors":errors
+        "camelot_errors":errors,
+        "debug":debug
     }
