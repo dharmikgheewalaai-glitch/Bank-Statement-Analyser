@@ -18,7 +18,8 @@ for key, default in {
     "rules": {k:list(v) for k,v in DEFAULT_RULES.items()},
     "accounts": {},
     "journal_heads": ["Depreciation","Outstanding Expense","GST Adjustment"],
-    "bank_account": ""
+    "bank_account": "",
+    "source_filename": ""
 }.items():
     if key not in st.session_state: st.session_state[key] = default
 
@@ -63,6 +64,7 @@ with st.sidebar:
                                  st.session_state.journal_heads,
                                  st.session_state.bank_account)
             st.session_state.df = df
+            st.session_state.source_filename = upload.name
             score = meta.get("validation",{}).get("score", 100 if len(df) else 0)
             add(upload.name, len(df), meta.get("method","Unknown"), score,
                 df.to_json(orient="records", date_format="iso"))
@@ -106,9 +108,10 @@ with dashboard:
         edited = st.data_editor(df, width="stretch", num_rows="dynamic")
         st.session_state.df = edited
 
+        out_name = Path(st.session_state.source_filename or "bank_statement_analysis").stem + ".xlsx"
         st.download_button("⬇️ Download Excel",
                            excel_bytes(edited),
-                           "bank_statement_analysis.xlsx",
+                           out_name,
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 with history:
@@ -132,6 +135,7 @@ with history:
                 data = get_history_data(int(r["id"]))
                 if data:
                     st.session_state.df = pd.read_json(data, orient="records")
+                    st.session_state.source_filename = r["File"]
                     st.success(f"Loaded '{r['File']}' into Dashboard tab.")
                 else:
                     st.warning("No saved data for this row (processed before this feature was added).")
