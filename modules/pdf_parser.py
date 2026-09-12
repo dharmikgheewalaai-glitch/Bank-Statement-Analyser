@@ -8,11 +8,12 @@ from .normalizer import normalize_debug
 def _smart_text(path):
     """Word-position + regex-line text extraction only, no Camelot."""
     frames, detections = [], []
-    for page in extract_pages(path):
+    for pno, page in enumerate(extract_pages(path), 1):
         df, meta = detect_word_table(page.get("words", []))
         if df.empty:
             df, meta = detect_text_table(page["text"])
         if not df.empty:
+            meta["page"] = pno
             frames.append(df)
             detections.append(meta)
     if not frames:
@@ -21,7 +22,7 @@ def _smart_text(path):
     validation = validate_table(raw)
     layout = detections[0].get("layout", {})
     method = detections[0].get("method", "Smart text")
-    return raw, validation, {"layout": layout, "method": method}
+    return raw, validation, {"layout": layout, "method": method, "page": detections[0].get("page")}
 
 def _camelot(path, flavors):
     raw, errors = extract_with_camelot(path, flavors=flavors)
@@ -51,14 +52,16 @@ def parse_pdf(path, mode="auto"):
         raw, validation, extra = _smart_text(path)
         out, debug = normalize_debug(raw) if not raw.empty else (pd.DataFrame(), {})
         return out, {"method":extra.get("method","Smart text"),"fallback":False,
-                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug}
+                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug,
+                      "page":extra.get("page")}
 
     # auto: try smart text first, fall back to camelot (both flavors) if weak
     raw, validation, extra = _smart_text(path)
     if not raw.empty and validation.get("ok") and extra.get("layout",{}).get("confidence",0) >= 60:
         out, debug = normalize_debug(raw)
         return out, {"method":extra.get("method","Text-first"),"fallback":False,
-                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug}
+                      "layout":extra.get("layout",{}),"validation":validation,"debug":debug,
+                      "page":extra.get("page")}
 
     raw, validation, extra = _camelot(path, ("lattice","stream"))
     out, debug = normalize_debug(raw)

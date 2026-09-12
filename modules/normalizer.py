@@ -1,6 +1,6 @@
 import re
 import pandas as pd
-from config.layouts import ALIASES
+from config.layouts import ALIASES, FIELD_PRIORITY
 
 def money(value):
     if pd.isna(value): return 0.0
@@ -10,19 +10,27 @@ def money(value):
     try: return float(s) if s else 0.0
     except ValueError: return 0.0
 
-def find_col(columns, aliases):
-    for col in columns:
-        c = re.sub(r"\s+"," ",str(col).lower().strip())
-        if any(a in c for a in aliases): return col
+def find_col(columns, aliases, priority=None):
+    """Alias order (priority list, if given) decides the winner when several
+    columns could match the same field — not table column order. e.g. when
+    both 'Transaction Date' and 'Value Date' exist, 'transaction date' being
+    earlier in the priority list wins, regardless of which column comes first
+    in the table."""
+    order = priority if priority else aliases
+    norm_cols = [(col, re.sub(r"\s+"," ",str(col).lower().strip())) for col in columns]
+    for a in order:
+        for col, c in norm_cols:
+            if a in c:
+                return col
     return None
 
 def normalize_debug(df):
     cols = list(df.columns)
-    date_col = find_col(cols, ALIASES["date"])
-    part_col = find_col(cols, ALIASES["particulars"])
-    debit_col = find_col(cols, ALIASES["debit"])
-    credit_col = find_col(cols, ALIASES["credit"])
-    balance_col = find_col(cols, ALIASES["balance"])
+    date_col = find_col(cols, ALIASES["date"], FIELD_PRIORITY["date"])
+    part_col = find_col(cols, ALIASES["particulars"], FIELD_PRIORITY["particulars"])
+    debit_col = find_col(cols, ALIASES["debit"], FIELD_PRIORITY["debit"])
+    credit_col = find_col(cols, ALIASES["credit"], FIELD_PRIORITY["credit"])
+    balance_col = find_col(cols, ALIASES["balance"], FIELD_PRIORITY["balance"])
 
     out = pd.DataFrame()
     out["Date"] = df[date_col] if date_col else ""

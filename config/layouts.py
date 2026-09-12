@@ -54,3 +54,12 @@ ALIASES = {
     "balance": ["balance","closing balance","balance(dr/cr)","balance (dr/cr)"],
     "amount_drcr": ["amount(dr/cr)","amount (dr/cr)"],
 }
+# priority order used when >1 column could match the same field (e.g. both
+# "Transaction Date" and "Value Date" present) — first hit in this order wins
+FIELD_PRIORITY = {
+    "date": ["transaction date","post date","date"],
+    "particulars": ["description","details","narration","particulars","remarks","remark"],
+    "debit": ["debit","withdrawal amt.","withdrawals","amount(dr)"],
+    "credit": ["credit","deposit amt.","deposits","amount(cr)"],
+    "balance": ["balance","closing balance"],
+}

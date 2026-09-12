@@ -69,9 +69,12 @@ with st.sidebar:
             st.caption(f"Method: {meta.get('method')} | Validation: {score}%")
             if meta.get("layout"):
                 st.caption(f"Detected: {meta['layout'].get('name')} ({meta['layout'].get('confidence')}%)")
+            if meta.get("page"):
+                st.caption(f"Header matched on page {meta['page']}")
             dbg = meta.get("debug")
             if dbg and len(df) == 0:
                 st.warning(
+                    f"Raw columns detected: {dbg.get('raw_columns')}\n\n"
                     f"Matched columns → Date: `{dbg['matched']['date']}` | "
                     f"Particulars: `{dbg['matched']['particulars']}` | "
                     f"Debit: `{dbg['matched']['debit']}` | Credit: `{dbg['matched']['credit']}`\n\n"
